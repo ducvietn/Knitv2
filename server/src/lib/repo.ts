@@ -234,6 +234,16 @@ export const listAnswers = async (questionId: string): Promise<Answer[]> => {
   )
 }
 
+/** Lấy một câu trả lời theo id — dùng sau khi dịch để trả về bản mới. */
+export const getAnswer = async (id: string): Promise<Answer | undefined> => {
+  const row = await sql.prepare(`${answerSelect} WHERE a.id = ?`).get<Row>(id)
+  if (!row) return undefined
+  const sources = await sql
+    .prepare('SELECT title, url, publisher FROM answer_sources WHERE answer_id = ? ORDER BY id')
+    .all<unknown>(id) as Source[]
+  return toAnswer(row, sources)
+}
+
 /* ----------------------------------------------------------- notifications */
 
 const toNotification = (row: Row): Notification => ({

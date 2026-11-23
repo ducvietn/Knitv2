@@ -13,13 +13,16 @@
  *
  * Nguyên tắc thiết kế:
  *
- * 1. **Không chặn request.** Dịch chạy nền sau khi response đã trả về cho
- *    client — người dùng không phải chờ. Lần tải trang sau sẽ thấy bản dịch.
- * 2. **Không chặn app.** Lỗi dịch không được làm sập server; mọi lỗi được
+ * 1. **Không chặn request.** Bản dịch được tạo ở chế độ nền sau khi câu hỏi
+ *    hoặc câu trả lời mới được đăng — người dùng không phải chờ.
+ * 2. **Có thể dịch tức thì.** Khi người dùng bấm "EN" mà bản dịch chưa sẵn
+ *    sàng, web gọi endpoint dịch on-demand để lấy bản dịch ngay, không cần
+ *    tải lại trang.
+ * 3. **Không chặn app.** Lỗi dịch không được làm sập server; mọi lỗi được
  *    nuốt và ghi log.
- * 3. **Tiết kiệm token.** Gộp nhiều đoạn vào một lần gọi API, yêu cầu
+ * 4. **Tiết kiệm token.** Gộp nhiều đoạn vào một lần gọi API, yêu cầu
  *    model trả về JSON để parse được.
- * 4. **Có thể tắt.** Không có `OPENAI_API_KEY` thì module tự bỏ qua.
+ * 5. **Có thể tắt.** Không có `OPENAI_API_KEY` thì module tự bỏ qua.
  */
 import { sql } from './db'
 
@@ -179,142 +182,241 @@ export async function translateSegments(segments: Segment[]): Promise<Record<str
 }
 
 /**
- * Dịch câu hỏi và cập nhật `title_en`, `body_en`.
+ * Dịch nhiều câu hỏi cùng lúc và cập nhật `title_en`, `body_en`.
  *
- * Chạy nền — không `await` từ route. Gọi lỗi cũng không ném ra ngoài.
+ * Dùng khi người dùng bấm "EN" ở trang danh sách — mọi câu hỏi đang hiện
+ * đều cần bản dịch, không chỉ một câu.
+ *
+ * Trả về `true` nếu có cập nhật.
+ */
+export async function translateQuestionsNow(questionIds: string[]): Promise<boolean> {
+  if (questionIds.length === 0) return false
+
+  const rows = await sql
+    .prepare(
+      `SELECT id, title, title_en, body, body_en
+         FROM questions WHERE id IN (${questionIds.map(() => '?').join(', ')})`,
+    )
+    .all<{ id: string; title: string; title_en: string; body: string; body_en: string }>(
+      ...questionIds,
+    )
+
+  let changed = false
+
+  // Gom MỌI đoạn của mọi câu hỏi vào MỘT lần gọi API — tiết kiệm token
+  // và giảm độ trễ khi người dùng bấm "EN" ở trang danh sách.
+  const segments: Segment[] = []
+  const plan: Array<{
+    id: string
+    needsTitle: boolean
+    needsBody: boolean
+    title: string
+    body: string
+    titleEn: string
+    bodyEn: string
+  }> = []
+
+  for (const row of rows) {
+    const needsTitle = !row.title_en || row.title_en === row.title
+    const needsBody = !row.body_en || row.body_en === row.body
+    if (!needsTitle && !needsBody) continue
+
+    plan.push({
+      id: row.id,
+      needsTitle,
+      needsBody,
+      title: row.title,
+      body: row.body,
+      titleEn: row.title_en,
+      bodyEn: row.body_en,
+    })
+
+    if (needsTitle) segments.push({ key: `${row.id}::title`, text: row.title })
+    if (needsBody) segments.push({ key: `${row.id}::body`, text: row.body })
+  }
+
+  if (segments.length === 0) return false
+
+  const map = await translateSegments(segments)
+  if (Object.keys(map).length === 0) return false
+
+  for (const item of plan) {
+    const titleEn = map[`${item.id}::title`]
+    const bodyEn = map[`${item.id}::body`]
+    if (!titleEn && !bodyEn) continue
+
+    await sql
+      .prepare(
+        `UPDATE questions
+           SET title_en = CASE WHEN ? = 1 THEN ? ELSE title_en END,
+               body_en  = CASE WHEN ? = 1 THEN ? ELSE body_en END
+         WHERE id = ?`,
+      )
+      .run(
+        item.needsTitle && titleEn ? 1 : 0,
+        titleEn ?? item.titleEn,
+        item.needsBody && bodyEn ? 1 : 0,
+        bodyEn ?? item.bodyEn,
+        item.id,
+      )
+    changed = true
+  }
+
+  if (changed) console.log(`[knit-translate] đã dịch ${plan.length} câu hỏi`)
+  return changed
+}
+
+/**
+ * Dịch một câu hỏi và cập nhật `title_en`, `body_en`.
+ *
+ * Đồng bộ — trả về sau khi ghi xong database. Dùng cho endpoint dịch
+ * on-demand (web gọi khi người dùng bấm "EN").
+ *
+ * Trả về `true` nếu có cập nhật, `false` nếu không cần dịch (đã có bản
+ * dịch) hoặc dịch thất bại.
+ */
+export async function translateQuestionNow(questionId: string): Promise<boolean> {
+  const rows = await sql
+    .prepare('SELECT id, title, title_en, body, body_en FROM questions WHERE id = ?')
+    .all<{ id: string; title: string; title_en: string; body: string; body_en: string }>(questionId)
+
+  const row = rows[0]
+  if (!row) return false
+
+  // Đã có bản dịch khác tiếng Việt thì không cần dịch lại.
+  const titleEn = row.title_en
+  const bodyEn = row.body_en
+  const needsTitle = !titleEn || titleEn === row.title
+  const needsBody = !bodyEn || bodyEn === row.body
+  if (!needsTitle && !needsBody) return false
+
+  const segments: Segment[] = []
+  if (needsTitle) segments.push({ key: 'title', text: row.title })
+  if (needsBody) segments.push({ key: 'body', text: row.body })
+
+  const map = await translateSegments(segments)
+  if (Object.keys(map).length === 0) return false
+
+  await sql
+    .prepare(
+      `UPDATE questions
+         SET title_en = CASE WHEN ? = 1 THEN ? ELSE title_en END,
+             body_en  = CASE WHEN ? = 1 THEN ? ELSE body_en END
+       WHERE id = ?`,
+    )
+    .run(needsTitle ? 1 : 0, map.title ?? titleEn, needsBody ? 1 : 0, map.body ?? bodyEn, row.id)
+
+  console.log(`[knit-translate] đã dịch câu hỏi ${row.id}`)
+  return true
+}
+
+/**
+ * Dịch một câu trả lời và cập nhật `body_en` (kèm phần biến thể và chuyển
+ * văn phòng nếu có).
+ *
+ * Đồng bộ — trả về sau khi ghi xong database.
+ */
+export async function translateAnswerNow(answerId: string): Promise<boolean> {
+  const rows = await sql
+    .prepare(
+      `SELECT id, body, body_en, variant_context, variant_context_en,
+              referral_office, referral_office_en, referral_note, referral_note_en
+         FROM answers WHERE id = ?`,
+    )
+    .all<{
+      id: string
+      body: string
+      body_en: string
+      variant_context: string | null
+      variant_context_en: string | null
+      referral_office: string | null
+      referral_office_en: string | null
+      referral_note: string | null
+      referral_note_en: string | null
+    }>(answerId)
+
+  const row = rows[0]
+  if (!row) return false
+
+  const segments: Segment[] = []
+  const needBody = !row.body_en || row.body_en === row.body
+  if (needBody) segments.push({ key: 'body', text: row.body })
+
+  const needVariant =
+    row.variant_context != null &&
+    (!row.variant_context_en || row.variant_context_en === row.variant_context)
+  if (needVariant) {
+    segments.push({ key: 'variant_context', text: row.variant_context ?? '' })
+  }
+
+  const needOffice =
+    row.referral_office != null &&
+    (!row.referral_office_en || row.referral_office_en === row.referral_office)
+  if (needOffice) {
+    segments.push({ key: 'referral_office', text: row.referral_office ?? '' })
+  }
+
+  const needNote =
+    row.referral_note != null &&
+    (!row.referral_note_en || row.referral_note_en === row.referral_note)
+  if (needNote) {
+    segments.push({ key: 'referral_note', text: row.referral_note ?? '' })
+  }
+
+  if (segments.length === 0) return false
+
+  const map = await translateSegments(segments)
+  if (Object.keys(map).length === 0) return false
+
+  await sql
+    .prepare(
+      `UPDATE answers
+         SET body_en             = CASE WHEN ? = 1 THEN ? ELSE body_en END,
+             variant_context_en  = CASE WHEN ? = 1 THEN ? ELSE variant_context_en END,
+             referral_office_en  = CASE WHEN ? = 1 THEN ? ELSE referral_office_en END,
+             referral_note_en    = CASE WHEN ? = 1 THEN ? ELSE referral_note_en END
+       WHERE id = ?`,
+    )
+    .run(
+      needBody ? 1 : 0,
+      map.body ?? row.body_en ?? row.body,
+      needVariant ? 1 : 0,
+      map.variant_context ?? row.variant_context_en ?? row.variant_context,
+      needOffice ? 1 : 0,
+      map.referral_office ?? row.referral_office_en ?? row.referral_office,
+      needNote ? 1 : 0,
+      map.referral_note ?? row.referral_note_en ?? row.referral_note,
+      row.id,
+    )
+
+  console.log(`[knit-translate] đã dịch câu trả lời ${row.id}`)
+  return true
+}
+
+/**
+ * Dịch câu hỏi ở chế độ nền — không chặn request.
+ *
+ * Dùng sau khi người dùng đăng câu hỏi mới. Lỗi không ném ra ngoài.
  */
 export function translateQuestionInBackground(questionId: string): void {
   if (!translateEnabled) return
 
-  void (async () => {
-    try {
-      const rows = await sql
-        .prepare('SELECT id, title, title_en, body, body_en FROM questions WHERE id = ?')
-        .all<{ id: string; title: string; title_en: string; body: string; body_en: string }>(
-          questionId,
-        )
-
-      const row = rows[0]
-      if (!row) return
-
-      // Đã có bản dịch khác tiếng Việt thì không cần dịch lại.
-      const titleEn = row.title_en
-      const bodyEn = row.body_en
-      const needsTitle = !titleEn || titleEn === row.title
-      const needsBody = !bodyEn || bodyEn === row.body
-      if (!needsTitle && !needsBody) return
-
-      const segments: Segment[] = []
-      if (needsTitle) segments.push({ key: 'title', text: row.title })
-      if (needsBody) segments.push({ key: 'body', text: row.body })
-
-      const map = await translateSegments(segments)
-      if (Object.keys(map).length === 0) return
-
-      await sql
-        .prepare(
-          `UPDATE questions
-             SET title_en = CASE WHEN ? = 1 THEN ? ELSE title_en END,
-                 body_en  = CASE WHEN ? = 1 THEN ? ELSE body_en END
-           WHERE id = ?`,
-        )
-        .run(needsTitle ? 1 : 0, map.title ?? titleEn, needsBody ? 1 : 0, map.body ?? bodyEn, row.id)
-
-      console.log(`[knit-translate] đã dịch câu hỏi ${row.id}`)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[knit-translate] lỗi khi dịch câu hỏi:', message)
-    }
-  })()
+  void translateQuestionNow(questionId).catch((err) => {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[knit-translate] lỗi khi dịch câu hỏi:', message)
+  })
 }
 
 /**
- * Dịch câu trả lời và cập nhật `body_en` (kèm phần biến thể và chuyển văn
- * phòng nếu có).
+ * Dịch câu trả lời ở chế độ nền — không chặn request.
  *
- * Chạy nền — không `await` từ route.
+ * Dùng sau khi người dùng đăng câu trả lời mới. Lỗi không ném ra ngoài.
  */
 export function translateAnswerInBackground(answerId: string): void {
   if (!translateEnabled) return
 
-  void (async () => {
-    try {
-      const rows = await sql
-        .prepare(
-          `SELECT id, body, body_en, variant_context, variant_context_en,
-                  referral_office, referral_office_en, referral_note, referral_note_en
-             FROM answers WHERE id = ?`,
-        )
-        .all<{
-          id: string
-          body: string
-          body_en: string
-          variant_context: string | null
-          variant_context_en: string | null
-          referral_office: string | null
-          referral_office_en: string | null
-          referral_note: string | null
-          referral_note_en: string | null
-        }>(answerId)
-
-      const row = rows[0]
-      if (!row) return
-
-      const segments: Segment[] = []
-      const needBody = !row.body_en || row.body_en === row.body
-      if (needBody) segments.push({ key: 'body', text: row.body })
-
-      const needVariant =
-        row.variant_context != null &&
-        (!row.variant_context_en || row.variant_context_en === row.variant_context)
-      if (needVariant) {
-        segments.push({ key: 'variant_context', text: row.variant_context ?? '' })
-      }
-
-      const needOffice =
-        row.referral_office != null &&
-        (!row.referral_office_en || row.referral_office_en === row.referral_office)
-      if (needOffice) {
-        segments.push({ key: 'referral_office', text: row.referral_office ?? '' })
-      }
-
-      const needNote =
-        row.referral_note != null &&
-        (!row.referral_note_en || row.referral_note_en === row.referral_note)
-      if (needNote) {
-        segments.push({ key: 'referral_note', text: row.referral_note ?? '' })
-      }
-
-      if (segments.length === 0) return
-
-      const map = await translateSegments(segments)
-      if (Object.keys(map).length === 0) return
-
-      await sql
-        .prepare(
-          `UPDATE answers
-             SET body_en             = CASE WHEN ? = 1 THEN ? ELSE body_en END,
-                 variant_context_en  = CASE WHEN ? = 1 THEN ? ELSE variant_context_en END,
-                 referral_office_en  = CASE WHEN ? = 1 THEN ? ELSE referral_office_en END,
-                 referral_note_en    = CASE WHEN ? = 1 THEN ? ELSE referral_note_en END
-           WHERE id = ?`,
-        )
-        .run(
-          needBody ? 1 : 0,
-          map.body ?? row.body_en ?? row.body,
-          needVariant ? 1 : 0,
-          map.variant_context ?? row.variant_context_en ?? row.variant_context,
-          needOffice ? 1 : 0,
-          map.referral_office ?? row.referral_office_en ?? row.referral_office,
-          needNote ? 1 : 0,
-          map.referral_note ?? row.referral_note_en ?? row.referral_note,
-          row.id,
-        )
-
-      console.log(`[knit-translate] đã dịch câu trả lời ${row.id}`)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[knit-translate] lỗi khi dịch câu trả lời:', message)
-    }
-  })()
+  void translateAnswerNow(answerId).catch((err) => {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[knit-translate] lỗi khi dịch câu trả lời:', message)
+  })
 }

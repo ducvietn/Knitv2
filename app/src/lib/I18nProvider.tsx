@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { setLang, state, subscribe } from '../store/knit'
+import { changeLang, state, subscribe } from '../store/knit'
 import { I18nContext, type Lang } from './i18n'
 
 /**
@@ -13,7 +13,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useMemo(() => subscribe(() => setLocalLang(state.lang)), [])
 
   const handleSetLang = useCallback((next: Lang) => {
-    setLang(next)
+    /**
+     * `changeLang` (không phải `setLang`) vì nó còn kích hoạt dịch tức thì:
+     * bấm "EN" thì nội dung chưa có bản dịch sẽ được dịch ngay và cập
+     * nhật giao diện — không cần tải lại trang.
+     */
+    changeLang(next)
     setLocalLang(next)
   }, [])
 

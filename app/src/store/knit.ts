@@ -105,7 +105,123 @@ export const setDraft = (key: string, value: string) => {
   commit()
 }
 
-/* -------------------------------------------------------------- phiên đăng nhập */
+/* --------------------------------------------------- dịch tức thì khi bấm EN */
+
+/**
+ * Người dùng bấm nút "EN" thì nội dung phải hiện tiếng Anh NGAY, không
+ * cần tải lại trang.
+ *
+ * Vì sao cần?
+ *
+ * Bản dịch tiếng Anh được tạo ở chế độ nền ngay sau khi câu hỏi/câu trả
+ * lời mới được đăng. Nên nếu người dùng bấm "EN" ngay sau khi đăng (hoặc
+ * bấm lại nhiều lần), bản dịch có thể chưa kịp sẵn sàng — giao diện sẽ
+ * hiện tiếng Việt dù đang ở chế độ EN.
+ *
+ * Ở đây ta kiểm tra nội dung đang hiển thị: nếu còn đoạn nào chưa có bản
+ * dịch (hoặc bản dịch trùng với bản gốc) thì gọi API dịch, rồi cập nhật
+ * state để giao diện vẽ lại — không reload trang.
+ */
+
+/** Kiểm tra một câu hỏi còn đoạn nào chưa được dịch không. */
+const questionNeedsTranslation = (q: Question): boolean =>
+  !q.titleEn ||
+  q.titleEn === q.title ||
+  !q.bodyEn ||
+  q.bodyEn === q.body
+
+/** Kiểm tra một câu trả lời còn đoạn nào chưa được dịch không. */
+const answerNeedsTranslation = (a: Answer): boolean => {
+  if (!a.bodyEn || a.bodyEn === a.body) return true
+  if (a.variant && (!a.variant.contextEn || a.variant.contextEn === a.variant.context)) {
+    return true
+  }
+  if (a.referral) {
+    if (a.referral.office && (!a.referral.officeEn || a.referral.officeEn === a.referral.office)) {
+      return true
+    }
+    if (a.referral.note && (!a.referral.noteEn || a.referral.noteEn === a.referral.note)) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Đang dịch câu hỏi nào — dùng để không gọi trùng. */
+const translating = new Set<string>()
+
+/**
+ * Dịch những nội dung đang hiển thị mà chưa có bản dịch.
+ *
+ * Hàm này KHÔNG chặn việc đổi ngôn ngữ: giao diện chuyển sang tiếng Anh
+ * ngay lập tức, bản dịch về sau sẽ tự cập nhật.
+ */
+export const translateVisibleContent = async (): Promise<void> => {
+  if (state.lang !== 'en') return
+
+  const questions = state.questions.filter(questionNeedsTranslation)
+  const answers = state.answers.filter(answerNeedsTranslation)
+
+  if (questions.length === 0 && answers.length === 0) return
+
+  // Bỏ qua những id đang được dịch dở để không gọi trùng.
+  const questionIds = questions
+    .map((q) => q.id)
+    .filter((id) => !translating.has(id))
+  const answerIds = answers
+    .map((a) => a.id)
+    .filter((id) => !translating.has(id))
+
+  if (questionIds.length === 0 && answerIds.length === 0) return
+
+  for (const id of [...questionIds, ...answerIds]) translating.add(id)
+
+  try {
+    const res = await api.post<{ questions: Question[]; answers: Answer[] }>('/translate', {
+      questionIds,
+      answerIds,
+    })
+
+    for (const q of res.questions ?? []) {
+      const index = state.questions.findIndex((x) => x.id === q.id)
+      if (index >= 0) state.questions[index] = q
+    }
+    for (const a of res.answers ?? []) {
+      const index = state.answers.findIndex((x) => x.id === a.id)
+      if (index >= 0) state.answers[index] = a
+    }
+
+    commit()
+  } catch {
+    // Dịch thất bại không được làm hỏng giao diện — người dùng vẫn đọc
+    // được nội dung tiếng Việt gốc.
+  } finally {
+    for (const id of [...questionIds, ...answerIds]) translating.delete(id)
+  }
+}
+
+/**
+ * Đổi ngôn ngữ và tự dịch nếu cần.
+ *
+ * Hàm này được `I18nProvider` gọi khi người dùng bấm nút ngôn ngữ.
+ */
+export const changeLang = (lang: 'vi' | 'en') => {
+  setLang(lang)
+  if (lang === 'en') void translateVisibleContent()
+}
+
+/**
+ * Nạp lại danh sách câu hỏi + câu trả lời rồi dịch phần còn thiếu.
+ *
+ * Dùng sau khi đăng câu hỏi/câu trả lời mới: nội dung mới chưa có bản
+ * dịch, nên bấm "EN" phải dịch ngay thay vì chờ nền.
+ */
+export const refreshAndTranslate = async (): Promise<void> => {
+  await refreshQuestions()
+  if (state.lang === 'en') await translateVisibleContent()
+}
+
+
 
 export const login = async (email: string, password: string) => {
   const res = await api.post<{ token: string; user: PublicUser }>('/auth/login', { email, password })

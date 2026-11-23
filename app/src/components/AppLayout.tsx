@@ -9,6 +9,7 @@ import {
   unreadNotifications,
 } from '../store/knit'
 import { useI18n } from '../lib/i18n'
+import { useAutoTranslate } from '../lib/useAutoTranslate'
 import { NotificationsPanel } from './NotificationsPanel'
 import { AuthDialog } from './AuthDialog'
 import { UserMenu } from './UserMenu'
@@ -16,6 +17,9 @@ import { UserMenu } from './UserMenu'
 export function AppLayout() {
   const { t, lang, setLang } = useI18n()
   const location = useLocation()
+
+  // Dịch nội dung còn thiếu bản dịch khi đang ở chế độ "EN".
+  useAutoTranslate()
   const [notifOpen, setNotifOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)

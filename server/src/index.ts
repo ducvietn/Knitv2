@@ -11,6 +11,7 @@ import { authRouter } from './routes/auth'
 import { avatarRouter } from './routes/avatar'
 import { notificationsRouter, reportsRouter } from './routes/notifications'
 import { questionsRouter } from './routes/questions'
+import { translateRouter } from './routes/translate'
 import { isDatabaseEmpty, readSeedFile, seedIfEmpty } from './seed-data'
 
 const app = express()
@@ -60,6 +61,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRouter)
 app.use('/api/avatar', avatarRouter)
 app.use('/api/questions', questionsRouter)
+app.use('/api/translate', translateRouter)
 app.use('/api', answersRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/reports', reportsRouter)
