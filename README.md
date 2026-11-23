@@ -133,75 +133,73 @@ Kiem tra:
 
 ### Supabase (Postgres) + Northflank (app)
 
-Kien trúc: Supabase giữ database (và Storage cho avatar), Northflank chạy
-container app và trỏ `DATABASE_URL` về Supabase. Northflank **không** có
-persistent volume cho combined service nên SQLite không dùng được ở đây.
+Kien trúc: Supabase giu database (va Storage cho avatar), Northflank chay
+container app va tro `DATABASE_URL` ve Supabase. Northflank **khong** co
+persistent volume cho combined service nen SQLite khong dung duoc o day.
 
-**Buoc 1 — Supabase.** Tao project tai supabase.com, lay connection string
-(URI, port 5432 — session pooler) va `SUPABASE_ACCESS_TOKEN` (Dashboard >
-Account > Access Tokens).
+#### Buoc 1 — Supabase
 
-    npm i -g supabase
-    supabase login --token <SUPABASE_ACCESS_TOKEN>
-    supabase link --project-ref <project-ref>
-    supabase db push            # ap dung supabase/migrations/0001_init.sql
+Tao project tai supabase.com, roi lay:
+- connection string (Project Settings > Database > Connection string > URI,
+  port 5432 — session pooler)
+- `SUPABASE_ACCESS_TOKEN` (Dashboard > Account > Access Tokens)
+- `project ref` (lay tu URL `https://<ref>.supabase.co`)
 
-Nap du lieu mau (tuong doi DATABASE_URL tro ve Supabase):
-
+    $env:SUPABASE_ACCESS_TOKEN="<access-token>"
+    $env:SUPABASE_PROJECT_REF="<project-ref>"
     $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
+    npm run deploy:supabase
+
+Script nay lam ba viec: `supabase login` → `supabase link` →
+`supabase db push` (ap dung `supabase/migrations/0001_init.sql`) →
+`npm run seed:pg` (nap du lieu mau).
+
+Neu khong dung CLI duoc, mo **SQL Editor** tren dashboard va chay noi dung
+`supabase/migrations/0001_init.sql`, roi nap du lieu mau bang:
+
     npm run seed:pg
 
-**Buoc 2 — Storage cho avatar.** Dashboard > Storage > New bucket, ten
-`avatars`, bat **Public**. Container khong co volume nen `KNIT_AVATAR_DIR`
-se mat sach khi restart — dung Storage de anh song lau.
+#### Buoc 2 — Storage cho avatar
 
-**Buoc 3 — Northflank.** Khong co CLI, dung REST API
-`https://api.northflank.com/v1`. Token lay o Team Settings > API > Tokens.
+Dashboard > Storage > New bucket, ten `avatars`, bat **Public**. Container
+khong co volume nen `KNIT_AVATAR_DIR` se mat sach khi restart — dung
+Storage de anh song lau. Script deploy tu gan `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY` va `SUPABASE_STORAGE_BUCKET`.
 
-    $env:NF_TOKEN="<northflank-api-token>"
-    $env:NF_TEAM="<team-id>"
+#### Buoc 3 — Northflank
 
-Tao project:
+Khong co CLI Northflank tren npm, nen `scripts/deploy-northflank.mjs` goi
+truc tiep REST API `https://api.northflank.com/v1`. Token lay o
+**Team Settings > API > Tokens**.
 
-    $h = @{ Authorization = "Bearer $env:NF_TOKEN" }
-    $project = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/teams/$env:NF_TEAM/projects" -Headers $h -Body (@{ name = "knit" } | ConvertTo-Json)
+    $env:NORTHFLANK_API_TOKEN="<northflank-api-token>"
+    $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
+    $env:SUPABASE_URL="https://<ref>.supabase.co"
+    $env:SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
+    npm run deploy:northflank
 
-Tao combined service (build tu Dockerfile trong repo):
+Script se:
 
-    $body = @{
-      name = "knit-web"
-      deployment = @{ instances = 1 }
-      buildSettings = @{ buildEngine = "buildkit"; dockerfile = @{ buildEngine = "buildkit"; dockerFilePath = "/Dockerfile"; dockerWorkDir = "/" } }
-      vcsData = @{ projectUrl = "https://github.com/ducvietn/Knitv2"; projectType = "github"; projectBranch = "main" }
-    } | ConvertTo-Json -Depth 10
-    $svc = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/combined" -Headers $h -Body $body -ContentType "application/json"
+1. lay team tu token (hoac dung `NORTHFLANK_TEAM_ID` neu token chua gan team),
+2. tao project `knit` o region `asia-southeast` (neu chua co),
+3. tao combined service `knit-web` build tu `/Dockerfile`, branch `main`,
+   cong public `p01` → `4000`,
+4. gan bien moi truong runtime (`KNIT_DB_DRIVER=postgres`, `DATABASE_URL`,
+   `KNIT_SECRET`, `KNIT_WEB_DIST`, `KNIT_SEED`, va cac bien Storage),
+5. kich hoat build va in ra domain public.
 
-Dat bien moi truong (quan trong — `KNIT_DB_DRIVER=postgres` va `DATABASE_URL`):
-
-    $envs = @(
-      @{ name = "NODE_ENV"; value = "production" }
-      @{ name = "PORT"; value = "4000" }
-      @{ name = "KNIT_DB_DRIVER"; value = "postgres" }
-      @{ name = "DATABASE_URL"; value = "<supabase-url>?sslmode=require" }
-      @{ name = "KNIT_SECRET"; value = "<chuoi-ngau-nhien>" }
-      @{ name = "KNIT_WEB_DIST"; value = "/app/app/dist" }
-      @{ name = "KNIT_SEED"; value = "/app/server/seed-data.json" }
-      @{ name = "SUPABASE_URL"; value = "https://<project-ref>.supabase.co" }
-      @{ name = "SUPABASE_SERVICE_ROLE_KEY"; value = "<service-role-key>" }
-    ) | ConvertTo-Json
-    Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/$($svc.id)/environment" -Headers $h -Body $envs -ContentType "application/json"
-
-Mo cong public:
-
-    $port = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/$($svc.id)/ports" -Headers $h -Body (@{ internalPort = 4000; protocol = "HTTP"; public = $true; name = "p01" } | ConvertTo-Json) -ContentType "application/json"
-
-Northflank tu cap domain HTTPS (Let's Encrypt). Deploy lai moi lan push
-commit len `main` — container chay `docker-entrypoint.sh` tu chay migrate
-va nap du lieu mau (neu database rong) truoc khi start server.
+Northflank tu cap domain HTTPS (Let's Encrypt). Container chay
+`docker-entrypoint.sh` se tu chay migrate + nap du lieu mau (neu database
+rong) truoc khi start server, nen khong can chay migration thu cong.
 
 Kiem tra:
 
     curl https://<domain>/api/health
+
+> **Luu y:** `runtimeEnvironment` va `ports` bi thay the toan bo khi PATCH.
+> Script luon gui day du, nen khong mat bien nao. `KNIT_SECRET` duoc sinh
+> moi lan chay — neu can giu nguyen, them `NORTHFLANK_KNIT_SECRET` vao bien
+> moi truong truoc khi chay script.
 
 ### Render
 

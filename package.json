@@ -21,6 +21,8 @@
     "test:avatar": "tsx scripts/test-avatar-storage.mjs",
     "smoke:sqlite": "tsx scripts/smoke-sqlite.mjs",
     "smoke:postgres": "tsx scripts/smoke-postgres.mjs",
+    "deploy:supabase": "node scripts/setup-supabase.mjs",
+    "deploy:northflank": "node scripts/deploy-northflank.mjs",
     "test": "npm run test:pg && npm run test:pg-e2e && npm run test:avatar && npm run smoke:sqlite && npm run smoke:postgres"
   },
   "devDependencies": {
