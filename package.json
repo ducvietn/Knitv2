@@ -25,6 +25,9 @@
     "deploy:supabase": "node scripts/setup-supabase.mjs",
     "deploy:storage": "node scripts/setup-storage.mjs",
     "verify:db": "node scripts/verify-db.mjs",
+    "translate:backfill": "tsx scripts/translate-backfill.ts",
+    "translate:check": "node scripts/check-translate.mjs",
+    "translate:status": "node scripts/check-translations.mjs",
     "test": "npm run test:pg && npm run test:pg-e2e && npm run test:avatar && npm run smoke:sqlite && npm run smoke:postgres"
   },
   "devDependencies": {

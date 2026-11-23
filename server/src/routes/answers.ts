@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { sql, nowIso } from '../lib/db'
 import { requireAuth, isModerator, type AuthedRequest } from '../lib/auth'
 import { getQuestion, listAnswers, listMyAlsoNeed, listMyHelpful, listQuestions, pushNotification } from '../lib/repo'
+import { translateAnswerInBackground } from '../lib/translate'
 import type { Topic } from '../../../shared/types'
 
 export const answersRouter = Router()
@@ -101,6 +102,9 @@ answersRouter.post('/questions/:questionId/answers', requireAuth, async (req: Au
       questionId: question.id,
     })
   }
+
+  // Dịch sang tiếng Anh chạy nền — người trả lời không phải chờ.
+  translateAnswerInBackground(id)
 
   res.status(201).json({ answers: await listAnswers(question.id) })
 })

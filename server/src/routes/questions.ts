@@ -4,6 +4,7 @@ import { sql, nowIso } from '../lib/db'
 import { requireAuth, isModerator, type AuthedRequest } from '../lib/auth'
 import { getQuestion, incrementViews, listAnswers, listQuestions, listTopicFollowers, pushNotification } from '../lib/repo'
 import { rankSimilar } from '../lib/similar'
+import { translateQuestionInBackground } from '../lib/translate'
 import type { Topic } from '../../../shared/types'
 
 export const questionsRouter = Router()
@@ -115,6 +116,9 @@ questionsRouter.post('/', requireAuth, async (req: AuthedRequest, res) => {
       questionId: id,
     })
   }
+
+  // Dịch sang tiếng Anh chạy nền — người đăng không phải chờ.
+  translateQuestionInBackground(id)
 
   res.status(201).json({ question: await getQuestion(id, req.user!.id) })
 })
