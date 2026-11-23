@@ -400,9 +400,22 @@ const buildFullReply = async (
       ready: true,
     }
   }
+  /**
+   * Đối chiếu câu trả lời với danh sách nguồn thật.
+   *
+   * Model đôi khi nói "diễn đàn chưa có bài nào liên quan" dù đã có nguồn
+   * (hoặc ngược lại — nói có trong khi không có nguồn nào). Ở đây ta ép buộc
+   * hai phần nhất quán với nhau:
+   *
+   * - Có nguồn → không được nói là không có bài nào.
+   * - Không có nguồn → phải nói rõ và gợi ý đăng bài.
+   */
+  const answer = reconcileAnswerWithSources(payload.answer, relevant.length, turn.lang)
+
+
 
   return {
-    answer: payload.answer,
+    answer,
     sources: relevant,
     suggestPost: payload.suggestPost ?? relevant.length === 0,
     suggestedTitle: payload.suggestedTitle || turn.question,
@@ -410,6 +423,63 @@ const buildFullReply = async (
     suggestAnonymous: payload.suggestAnonymous ?? false,
     ready: true,
   }
+}
+
+/**
+ * Ép câu trả lời khớp với thực tế có nguồn hay không.
+ *
+ * Chỉ sửa khi model nói lệch. Nếu model đã nói đúng thì giữ nguyên — đừng
+ * cắt bỏ thông tin hữu ích chỉ vì thiếu một cụm từ khóa.
+ */
+const reconcileAnswerWithSources = (
+  answer: string,
+  sourceCount: number,
+  lang: 'vi' | 'en',
+): string => {
+  const lower = answer.toLowerCase()
+
+  /**
+   * Các cụm từ mang nghĩa "không tìm thấy gì".
+   *
+   * Dùng cả tiếng Việt và tiếng Anh vì câu hỏi có thể đến từ cả hai ngôn
+   * ngữ, và model trộn ngôn ngữ theo ngôn ngữ của người hỏi.
+   */
+  const noResultPhrases = [
+    'chưa có bài',
+    'chưa tìm thấy',
+    'không có bài',
+    'không tìm thấy',
+    'chưa có thông tin',
+    'không có thông tin',
+    'chưa có nội dung',
+    'không có nội dung',
+    'chưa có gì liên quan',
+    'chưa tìm được',
+    'không tìm được',
+    'no threads',
+    'no related',
+    'nothing found',
+    'no information',
+    'not found',
+  ]
+
+  const claimsNoResult = noResultPhrases.some((phrase) => lower.includes(phrase))
+
+  // Có nguồn nhưng model nói không có → sửa.
+  if (sourceCount > 0 && claimsNoResult) {
+    return lang === 'en'
+      ? 'Here are the threads from the community that cover this. Have a read below — and if your situation differs, post it so the seniors can help.'
+      : 'Dưới đây là các bài trong cộng đồng nói về vấn đề này. Bạn đọc tham khảo nhé — nếu trường hợp của bạn khác, cứ đăng câu hỏi để mọi người giúp.'
+  }
+
+  // Không có nguồn nhưng model nói có → sửa.
+  if (sourceCount === 0 && !claimsNoResult) {
+    return lang === 'en'
+      ? 'I could not find any thread in the community about this yet. It looks like a good question to post — the seniors may know the exact procedure.'
+      : 'Mình chưa tìm thấy bài nào trong cộng đồng về vấn đề này. Đây có vẻ là câu hỏi nên đăng lên diễn đàn — các anh chị khóa trên chắc là biết quy trình chính xác.'
+  }
+
+  return answer
 }
 
 /**
@@ -469,17 +539,36 @@ const rerankSources = async (
   const ids = payload?.relevantIds
 
   /**
-   * Model lỗi hoặc trả về rỗng → giữ nguyên danh sách gốc.
+   * Model LỖI (không trả về gì) → giữ danh sách gốc.
    *
-   * Với trường hợp này, độ tin cậy đặt 0 để Tầng 3 kích hoạt tra cứu web.
+   * Khác với trường hợp bên dưới: ở đây ta KHÔNG biết model nghĩ gì, nên
+   * giữ ứng viên để không mất thông tin. Độ tin cậy đặt 0 để Tầng 3 kích
+   * hoạt tra cứu web.
    */
-  if (!Array.isArray(ids) || ids.length === 0) return { hits, confidence: 0 }
+  if (payload === undefined || ids === undefined) {
+    return { hits, confidence: 0 }
+  }
+
+  /**
+   * Model trả về MẢNG RỖNG → nghĩa là nó đã đọc và kết luận KHÔNG có bài
+   * nào đáng trích dẫn.
+   *
+   * Đây là tín hiệu quan trọng nhất, và phải tôn trọng tuyệt đối. Trước
+   * đây code fallback về toàn bộ 20 ứng viên — nên sinh viên thấy 8 thẻ
+   * hoàn toàn không liên quan (chuyển khoa, học bổng, bảo hiểm...) trong
+   * khi bot bảo "diễn đàn chưa có bài nào liên quan". Giờ trả về rỗng:
+   * không có thẻ nguồn thì không hiện thẻ nguồn.
+   */
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { hits: [], confidence: 0 }
+  }
 
   const chosen = ids
     .map((id) => candidates[Number(String(id).replace(/^s/, ''))])
     .filter((hit): hit is RagHit => Boolean(hit))
 
-  if (chosen.length === 0) return { hits, confidence: 0 }
+  // Model trả về id không hợp lệ → cũng coi như không có nguồn nào đáng dùng.
+  if (chosen.length === 0) return { hits: [], confidence: 0 }
 
   const confidence = Math.max(0, Math.min(1, Number(payload?.confidence ?? 0.5)))
 
