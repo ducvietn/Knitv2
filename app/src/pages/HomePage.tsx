@@ -103,6 +103,19 @@ export function HomePage() {
   }
 
   /**
+   * Đóng gợi ý khi người dùng cuộn trang.
+   *
+   * Không làm vậy thì danh sách gợi ý nổi lên che mất danh sách câu hỏi
+   * bên dưới, và người dùng tưởng trang bị kẹt — không cuộn xuống được.
+   */
+  useEffect(() => {
+    if (suggestions.length === 0) return
+    const onScroll = () => setSuggestions([])
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [suggestions.length])
+
+  /**
    * Cắt danh sách theo trang.
    *
    * Trang hiện tại được ép về giới hạn hợp lệ — ví dụ người dùng đang ở
@@ -118,16 +131,26 @@ export function HomePage() {
   return (
     <div>
       {/* Hero — nơi người dùng bắt đầu: gõ câu hỏi, KNIT gợi ý câu đã có */}
-      <section className="relative overflow-hidden border-b border-paper-300 bg-brand-900 text-white">
-        <div className="grain absolute inset-0 opacity-70" aria-hidden />
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle at 18% 20%, rgba(214,174,133,0.5), transparent 42%), radial-gradient(circle at 82% 78%, rgba(130,168,226,0.4), transparent 46%)',
-          }}
-          aria-hidden
-        />
+      {/*
+        Hero — nơi người dùng bắt đầu: gõ câu hỏi, KNIT gợi ý câu đã có.
+
+        `overflow-hidden` bị bỏ khỏi `<section>` vì nó CẮT danh sách gợi ý
+        (dropdown `absolute` nằm trong hero). Thay vào đó, phần nền gradient
+        được bọc trong một div riêng có `overflow-hidden` — hiệu ứng giữ nguyên
+        mà dropdown vẫn tràn ra được.
+      */}
+      <section className="relative border-b border-paper-300 bg-brand-900 text-white">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="grain absolute inset-0 opacity-70" aria-hidden />
+          <div
+            className="absolute inset-0 opacity-30"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at 18% 20%, rgba(214,174,133,0.5), transparent 42%), radial-gradient(circle at 82% 78%, rgba(130,168,226,0.4), transparent 46%)',
+            }}
+            aria-hidden
+          />
+        </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-14 sm:py-20">
           <div className="max-w-3xl">
@@ -181,8 +204,17 @@ export function HomePage() {
               </div>
 
               {suggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-2 animate-fade-up overflow-hidden rounded-2xl border border-paper-300 bg-white shadow-lift">
-                  <p className="border-b border-paper-200 bg-paper-50 px-4 py-2 text-2xs font-semibold uppercase tracking-wider text-ink-faint">
+                <>
+                  {/* Nền mờ — bấm ra ngoài để đóng danh sách gợi ý */}
+                  <button
+                    type="button"
+                    aria-label={t('Đóng gợi ý', 'Close suggestions')}
+                    onClick={() => setSuggestions([])}
+                    className="fixed inset-0 z-20 cursor-default bg-brand-900/40 backdrop-blur-[2px]"
+                  />
+
+                  <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-[60vh] animate-fade-up overflow-y-auto rounded-2xl border border-paper-300 bg-white shadow-lift scrollbar-slim">
+                    <p className="sticky top-0 border-b border-paper-200 bg-paper-50 px-4 py-2 text-2xs font-semibold uppercase tracking-wider text-ink-faint">
                     {t(
                       'Câu hỏi tương tự đã có câu trả lời',
                       'Similar questions already answered',
@@ -215,13 +247,14 @@ export function HomePage() {
                       </li>
                     ))}
                   </ul>
-                  <div className="bg-paper-50 px-4 py-2.5 text-2xs text-ink-muted">
+                  <div className="sticky bottom-0 bg-paper-50 px-4 py-2.5 text-2xs text-ink-muted">
                     {t('Không thấy câu nào đúng? ', 'None of these fit? ')}
                     <Link to="/ask" className="font-semibold text-brand-700 hover:underline">
                       {t('Đặt câu hỏi mới', 'Ask a new question')}
                     </Link>
                   </div>
-                </div>
+                  </div>
+                </>
               )}
             </div>
 
