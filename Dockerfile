@@ -33,6 +33,9 @@ WORKDIR /app
 COPY server ./server
 COPY app ./app
 COPY shared ./shared
+# Script sinh `schema.generated.ts` tu `server/db/schema.sql`.
+# Phai copy ca `scripts` — build stage chay `node scripts/build-schema.mjs`.
+COPY scripts ./scripts
 
 # Build web app (Vite) — bản production với API cùng origin.
 RUN npm --prefix app ci && npm --prefix app run build

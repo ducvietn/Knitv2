@@ -29,7 +29,9 @@ if (!res.ok) {
 }
 
 const body = await res.json()
-const services = body?.services ?? body ?? []
+// Render tra ve array truc tiep; boc trong `{ services: [...] }` de tuong thich
+const rawList = Array.isArray(body) ? body : (body?.services ?? [])
+const services = rawList.map((s) => s.service ?? s)
 if (!services.length) {
   console.log('  (chua co service nao)')
 }

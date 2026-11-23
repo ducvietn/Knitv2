@@ -20,14 +20,22 @@ const headers = {
 }
 
 const SERVICE_NAME = process.env.RENDER_SERVICE_NAME ?? 'knit'
+const SERVICE_ID = process.env.RENDER_SERVICE_ID ?? 'srv-dc27g0s0916s73elopkg'
 const watchIdx = process.argv.indexOf('--watch')
 const watchSeconds = watchIdx !== -1 ? Number(process.argv[watchIdx + 1] ?? 300) : 0
 
-/* --- Tim service --- */
+/* --- Tim service ---
+ * Render tra ve MOT array truc tiep (khong boc trong `{ services: [...] }`).
+ * Chu hoa ca hai kieu de script khong phu thuoc thay doi format. */
 const listRes = await fetch('https://api.render.com/v1/services?limit=50', { headers })
 const listBody = await listRes.json()
-const services = (listBody?.services ?? []).map((s) => s.service ?? s)
-const service = services.find((s) => s.name === SERVICE_NAME)
+const rawList = Array.isArray(listBody) ? listBody : (listBody?.services ?? [])
+const services = rawList.map((s) => s.service ?? s)
+// So sanh khong phan biet hoa/thuong — Render tu doi chieu hoa chu
+const wanted = SERVICE_NAME.toLowerCase()
+const service =
+  services.find((s) => s.id === SERVICE_ID) ??
+  services.find((s) => (s.name ?? '').toLowerCase() === wanted)
 
 if (!service) {
   console.log(`Khong tim thay service "${SERVICE_NAME}".`)
