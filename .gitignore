@@ -18,6 +18,8 @@ server/data/
 # File cấu hình riêng cho từng nền tảng deploy (chứa connection string thật)
 .env.render
 .env.production
+# File env tam cho test local (chua key thật)
+.env.local-test
 
 # Log
 *.log

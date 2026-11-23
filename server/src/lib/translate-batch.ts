@@ -2,7 +2,7 @@ import { sql } from './db'
 import { translateSegments, type Segment } from './translate'
 
 /**
- * Dịch hàng loạt — gộp MỌI đoạn cần dịch vào MỘT lần gọi API.
+ * Dịch hàng loạt — gom MỌI đoạn cần dịch rồi gọi API SONG SONG.
  *
  * Vì sao cần?
  *
@@ -11,7 +11,8 @@ import { translateSegments, type Segment } from './translate'
  * một thì tốn gấp nhiều lần token và người dùng phải chờ lâu.
  *
  * Ở đây tất cả đoạn văn được đóng gói thành một danh sách `segments` với
- * khoá duy nhất, gửi đi một lần, rồi ghi kết quả về database.
+ * khoá duy nhất, rồi `translateSegments` tự chia nhỏ và gọi song song —
+ * xem `lib/translate.ts`.
  */
 
 /** Bản dịch của một câu hỏi. */
@@ -27,34 +28,6 @@ interface QuestionRow {
 interface AnswerRow {
   id: string
   question_id: string
-  body: string
-  body_en: string
-  variant_context: string | null
-  variant_context_en: string | null
-  referral_office: string | null
-  referral_office_en: string | null
-  referral_note: string | null
-  referral_note_en: string | null
-}
-
-/** Những đoạn của một câu hỏi cần dịch. */
-interface QuestionPlan {
-  id: string
-  needsTitle: boolean
-  needsBody: boolean
-  title: string
-  body: string
-  title_en: string
-  body_en: string
-}
-
-/** Những đoạn của một câu trả lời cần dịch. */
-interface AnswerPlan {
-  id: string
-  needsBody: boolean
-  needsVariant: boolean
-  needsOffice: boolean
-  needsNote: boolean
   body: string
   body_en: string
   variant_context: string | null
@@ -94,40 +67,25 @@ export async function translateContentNow(
       )
       .all<QuestionRow>(...questionIds)
 
-    const plans: QuestionPlan[] = []
-
     for (const row of rows) {
       const needsTitle = !row.title_en || row.title_en === row.title
       const needsBody = !row.body_en || row.body_en === row.body
-      if (!needsTitle && !needsBody) continue
 
-      plans.push({
-        id: row.id,
-        needsTitle,
-        needsBody,
-        title: row.title,
-        body: row.body,
-        title_en: row.title_en,
-        body_en: row.body_en,
-      })
-    }
-
-    for (const plan of plans) {
-      if (plan.needsTitle) {
+      if (needsTitle) {
         jobs.push({
-          text: plan.title,
+          text: row.title,
           save: async (text) => {
             await sql
               .prepare('UPDATE questions SET title_en = ? WHERE id = ?')
-              .run(text, plan.id)
+              .run(text, row.id)
           },
         })
       }
-      if (plan.needsBody) {
+      if (needsBody) {
         jobs.push({
-          text: plan.body,
+          text: row.body,
           save: async (text) => {
-            await sql.prepare('UPDATE questions SET body_en = ? WHERE id = ?').run(text, plan.id)
+            await sql.prepare('UPDATE questions SET body_en = ? WHERE id = ?').run(text, row.id)
           },
         })
       }
@@ -146,18 +104,7 @@ export async function translateContentNow(
       .all<AnswerRow>(...answerIds)
 
     for (const row of rows) {
-      const needsBody = !row.body_en || row.body_en === row.body
-      const needsVariant =
-        row.variant_context != null &&
-        (!row.variant_context_en || row.variant_context_en === row.variant_context)
-      const needsOffice =
-        row.referral_office != null &&
-        (!row.referral_office_en || row.referral_office_en === row.referral_office)
-      const needsNote =
-        row.referral_note != null &&
-        (!row.referral_note_en || row.referral_note_en === row.referral_note)
-
-      if (needsBody) {
+      if (!row.body_en || row.body_en === row.body) {
         jobs.push({
           text: row.body,
           save: async (text) => {
@@ -165,9 +112,12 @@ export async function translateContentNow(
           },
         })
       }
-      if (needsVariant) {
+      if (
+        row.variant_context != null &&
+        (!row.variant_context_en || row.variant_context_en === row.variant_context)
+      ) {
         jobs.push({
-          text: row.variant_context ?? '',
+          text: row.variant_context,
           save: async (text) => {
             await sql
               .prepare('UPDATE answers SET variant_context_en = ? WHERE id = ?')
@@ -175,9 +125,12 @@ export async function translateContentNow(
           },
         })
       }
-      if (needsOffice) {
+      if (
+        row.referral_office != null &&
+        (!row.referral_office_en || row.referral_office_en === row.referral_office)
+      ) {
         jobs.push({
-          text: row.referral_office ?? '',
+          text: row.referral_office,
           save: async (text) => {
             await sql
               .prepare('UPDATE answers SET referral_office_en = ? WHERE id = ?')
@@ -185,9 +138,12 @@ export async function translateContentNow(
           },
         })
       }
-      if (needsNote) {
+      if (
+        row.referral_note != null &&
+        (!row.referral_note_en || row.referral_note_en === row.referral_note)
+      ) {
         jobs.push({
-          text: row.referral_note ?? '',
+          text: row.referral_note,
           save: async (text) => {
             await sql
               .prepare('UPDATE answers SET referral_note_en = ? WHERE id = ?')
@@ -200,7 +156,7 @@ export async function translateContentNow(
 
   if (jobs.length === 0) return false
 
-  /* ------------------------------------------------- một lần gọi API duy nhất */
+  /* --------------------------------------- gom đoạn rồi gọi API song song */
 
   const segments: Segment[] = jobs.map((job, index) => ({
     key: `s${index}`,
@@ -219,7 +175,7 @@ export async function translateContentNow(
   }
 
   if (changed > 0) {
-    console.log(`[knit-translate] đã dịch ${changed}/${jobs.length} đoạn trong 1 lần gọi API`)
+    console.log(`[knit-translate] đã dịch ${changed}/${jobs.length} đoạn`)
   }
   return changed > 0
 }

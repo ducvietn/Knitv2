@@ -11,6 +11,7 @@ import {
 import { useI18n } from '../lib/i18n'
 import { useAutoTranslate } from '../lib/useAutoTranslate'
 import { NotificationsPanel } from './NotificationsPanel'
+import { ChatbotPanel } from './ChatbotPanel'
 import { AuthDialog } from './AuthDialog'
 import { UserMenu } from './UserMenu'
 
@@ -21,6 +22,7 @@ export function AppLayout() {
   // Dịch nội dung còn thiếu bản dịch khi đang ở chế độ "EN".
   useAutoTranslate()
   const [notifOpen, setNotifOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [, force] = useState(0)
@@ -29,6 +31,7 @@ export function AppLayout() {
   useEffect(() => {
     setMenuOpen(false)
     setNotifOpen(false)
+    setChatOpen(false)
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
   }, [location.pathname])
 
@@ -121,6 +124,24 @@ export function AppLayout() {
               aria-label={t('Đổi ngôn ngữ', 'Switch language')}
             >
               {lang === 'vi' ? 'EN' : 'VI'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setChatOpen(true)}
+              className="rounded-lg p-2 text-ink-muted transition hover:bg-paper-200 hover:text-ink"
+              aria-label={t('Trợ lý điều hướng', 'Navigation helper')}
+              title={t('Trợ lý điều hướng', 'Navigation helper')}
+            >
+              <svg
+                viewBox="0 0 20 20"
+                className="h-5 w-5 fill-none stroke-current stroke-2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M17.5 9.5c0 3.9-3.4 7-7.5 7-.9 0-1.8-.1-2.6-.4L3 17.5l1.4-3.6A6.6 6.6 0 0 1 2.5 9.5c0-3.9 3.4-7 7.5-7s7.5 3.1 7.5 7Z" />
+                <path d="M7 8.5h6M7 11.5h4" />
+              </svg>
             </button>
 
             <button
@@ -328,6 +349,8 @@ export function AppLayout() {
         onMarkAllRead={() => markAllNotificationsRead()}
         unread={unread}
       />
+
+      <ChatbotPanel open={chatOpen} onClose={() => setChatOpen(false)} />
 
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>

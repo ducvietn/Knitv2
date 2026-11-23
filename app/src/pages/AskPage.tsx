@@ -31,6 +31,28 @@ export function AskPage() {
     return () => window.clearTimeout(timer)
   }, [title, body])
 
+  /**
+   * Nhận nội dung từ chatbot.
+   *
+   * Khi người dùng bấm "Chuyển câu hỏi này thành bài đăng ẩn danh" trong
+   * khung chat, trợ lý lưu bản nháp vào `localStorage` rồi sang trang này —
+   * form tự điền sẵn để người dùng chỉ cần bấm "Đăng".
+   */
+  useEffect(() => {
+    const raw = localStorage.getItem('knit.chatDraft')
+    if (!raw) return
+    localStorage.removeItem('knit.chatDraft')
+    try {
+      const draft = JSON.parse(raw) as { title?: string; body?: string; anonymous?: boolean }
+      if (draft.title) setTitle(draft.title)
+      if (draft.body) setBody(draft.body)
+      if (draft.anonymous) setAnonymous(true)
+      setTouched(false)
+    } catch {
+      /* bản nháp hỏng — bỏ qua */
+    }
+  }, [])
+
   // Danh sách câu hỏi trong cộng đồng (cho bộ đếm và để chấm điểm gợi ý).
   useEffect(() => {
     refreshQuestions().catch(() => undefined)
