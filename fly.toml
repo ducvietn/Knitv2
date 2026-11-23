@@ -1,0 +1,53 @@
+# KNIT — cấu hình deploy cho Fly.io.
+#
+# Bắt đầu:
+#   fly launch --copy-config --no-deploy
+#   fly volumes create knit_data --size 1        # 1 GB, đủ cho pilot
+#   fly secrets set KNIT_SECRET=$(openssl rand -hex 32)
+#   fly deploy
+#
+# Chi phí: Fly cho 1 shared-cpu-1x VM + 1 volume 1 GB nằm trong free tier
+# (máy free bị tính giờ, volume có phí riêng rất nhỏ). Nếu muốn 0đ tuyệt đối
+# thì dùng Render free (không có persistent disk) — xem README.
+
+app = "knit-ulis"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "4000"
+  NODE_ENV = "production"
+  KNIT_DB = "/data/knit.db"
+  KNIT_AVATAR_DIR = "/data/avatars"
+  KNIT_WEB_DIST = "/app/app/dist"
+  KNIT_SEED = "/app/server/seed-data.json"
+
+# Dữ liệu nằm trên volume để không mất khi khởi động lại máy.
+[[mounts]]
+  source = "knit_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

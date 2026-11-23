@@ -1,0 +1,28 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "./Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "/usr/local/bin/docker-entrypoint.sh node server/dist/index.js",
+    "healthcheckPath": "/api/health",
+    "healthcheckTimeout": 30,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "numReplicas": 1,
+    "sleepApplication": true
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "NODE_ENV": "production",
+        "PORT": "4000",
+        "KNIT_DB": "/data/knit.db",
+        "KNIT_AVATAR_DIR": "/data/avatars",
+        "KNIT_WEB_DIST": "/app/app/dist",
+        "KNIT_SEED": "/app/server/seed-data.json"
+      }
+    }
+  }
+}

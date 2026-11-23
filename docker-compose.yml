@@ -1,0 +1,27 @@
+# Chạy KNIT bằng Docker ở local — giống hệt môi trường deploy.
+#
+#   docker compose up --build
+#   → http://localhost:4000
+#
+# Dữ liệu nằm trong volume `knit-data` nên không mất khi restart container.
+
+services:
+  knit:
+    build: .
+    ports:
+      - '4000:4000'
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      KNIT_DB: /data/knit.db
+      KNIT_AVATAR_DIR: /data/avatars
+      KNIT_WEB_DIST: /app/app/dist
+      KNIT_SEED: /app/server/seed-data.json
+      # Đổi chuỗi này khi deploy thật.
+      KNIT_SECRET: ${KNIT_SECRET:-doi-chuoi-nay-cho-moi truong}
+    volumes:
+      - knit-data:/data
+    restart: unless-stopped
+
+volumes:
+  knit-data:

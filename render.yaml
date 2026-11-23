@@ -1,0 +1,40 @@
+# KNIT — cấu hình deploy cho Render.
+#
+# Render free KHÔNG có persistent disk, nên SQLite sẽ mất dữ liệu mỗi lần
+# restart. Hai lựa chọn:
+#
+#  A) Dùng Render với disk (cần plan trả phí, ~$7/tháng):
+#     https://render.com/docs/disks
+#
+#  B) Dùng Render free + Neon/Supabase Postgres (có free tier Postgres).
+#     Khi đó cần đổi `server/src/lib/db.ts` sang driver `pg` — hiện tại
+#     code đang dùng better-sqlite3.
+#
+# Lựa chọn 0đ dễ nhất vẫn là Fly.io với volume 1 GB — xem `fly.toml`.
+
+services:
+  - type: web
+    name: knit
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # đổi thành `free` nếu chấp nhận mất dữ liệu khi restart
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: KNIT_DB
+        value: /data/knit.db
+      - key: KNIT_AVATAR_DIR
+        value: /data/avatars
+      - key: KNIT_WEB_DIST
+        value: /app/app/dist
+      - key: KNIT_SEED
+        value: /app/server/seed-data.json
+      - key: KNIT_SECRET
+        generateValue: true
+    disk:
+      name: knit-data
+      mountPath: /data
+      sizeGB: 1

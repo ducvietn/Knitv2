@@ -1,0 +1,35 @@
+# Phụ thuộc
+node_modules/
+
+# Kết quả build
+dist/
+*.tsbuildinfo
+
+# Dữ liệu SQLite (không đưa lên git — mỗi môi trường có một database riêng)
+server/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Biến môi trường (chứa bí mật)
+.env
+.env.local
+.env.*.local
+
+# Log
+*.log
+npm-debug.log*
+
+# Hệ điều hành / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Công cụ nội bộ của Impeccable
+.impeccable/
+.cursor/
+
+# Thư mục kiểm thử tạm
+.tmp*/
