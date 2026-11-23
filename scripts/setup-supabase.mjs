@@ -1,20 +1,19 @@
 /**
  * Thiết lập Supabase cho KNIT.
  *
- * Gồm ba bước:
+ * Gồm hai bước:
  *
- * 1. `supabase link` — liên kết project Supabase với thư mục này.
- * 2. `supabase db push` — áp dụng `supabase/migrations/0001_init.sql`.
- * 3. `npm run seed:pg` — nạp dữ liệu mẫu vào Postgres.
+ * 1. `supabase db push --remote=<url>` — áp dụng
+ *    `supabase/migrations/0001_init.sql` thẳng vào database.
+ * 2. `npm run seed:pg` — nạp dữ liệu mẫu vào Postgres.
  *
  * Cần biến môi trường:
  *
- *   SUPABASE_ACCESS_TOKEN — token từ Dashboard > Account > Access Tokens
- *   DATABASE_URL         — connection string (URI, port 5432) của project
+ *   DATABASE_URL — connection string (URI, port 5432) của project Supabase
+ *                 (Project Settings > Database > Connection string > URI)
  *
- * Tuỳ chọn:
- *
- *   SUPABASE_PROJECT_REF — project ref (lấy từ URL project)
+ * KHÔNG cần access token: `db push --remote=<url>` nối thẳng bằng mật
+ * khẩu database nên bỏ qua hoàn toàn `supabase link`.
  *
  * Chạy:  node scripts/setup-supabase.mjs
  */
@@ -24,9 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-const ACCESS_TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const DATABASE_URL = process.env.DATABASE_URL ?? ''
-const PROJECT_REF = process.env.SUPABASE_PROJECT_REF ?? ''
 
 const step = (n, text) => console.log(`\n[${n}] ${text}`)
 
@@ -42,36 +39,31 @@ const run = (command, args, env = {}) => {
   return result.status ?? 1
 }
 
-if (!ACCESS_TOKEN) {
-  console.error('Thiếu SUPABASE_ACCESS_TOKEN (Dashboard > Account > Access Tokens).')
-  process.exit(1)
-}
 if (!DATABASE_URL) {
   console.error('Thiếu DATABASE_URL (Project Settings > Database > Connection string > URI).')
   process.exit(1)
 }
-if (!PROJECT_REF) {
-  console.error('Thiếu SUPABASE_PROJECT_REF (lấy từ URL: https://<ref>.supabase.co).')
-  process.exit(1)
-}
 
-/* ------------------------------------------------------------- 1. login */
-step(1, 'Đăng nhập Supabase CLI')
-if (run('supabase', ['login', '--token', ACCESS_TOKEN]) !== 0) {
-  console.error('   đăng nhập thất bại.')
-  process.exit(1)
-}
+/* --------------------------------------------------------------- 1. db push */
+step(1, 'Áp dụng schema (supabase db push --remote=<url>)')
 
-/* -------------------------------------------------------------- 2. link */
-step(2, `Liên kết project ${PROJECT_REF}`)
-if (run('supabase', ['link', '--project-ref', PROJECT_REF]) !== 0) {
-  console.error('   link thất bại.')
-  process.exit(1)
-}
-
-/* --------------------------------------------------------------- 3. db push */
-step(3, 'Áp dụng schema (supabase db push)')
-const pushCode = run('supabase', ['db', 'push', '--include-seed=false'])
+/**
+ * `db push --remote=<url>` nối thẳng bằng connection string nên KHÔNG cần
+ * `supabase link` và không cần access token — chỉ cần mật khẩu database
+ * (đã nằm sẵn trong `DATABASE_URL`).
+ *
+ * Đây là đường ngắn nhất: `supabase link` đòi token có quyền
+ * "Project Settings + API Keys + API Key Secrets" (read), thường gây lỗi
+ * 403 với token bị scope hẹp.
+ */
+const pushCode = run('supabase', [
+  'db',
+  'push',
+  '--remote',
+  DATABASE_URL,
+  '--include-seed=false',
+  '--yes',
+])
 if (pushCode !== 0) {
   console.error('   `db push` thất bại.')
   console.error('   Nếu không dùng CLI được, mở SQL Editor trên dashboard và chạy')
@@ -79,8 +71,8 @@ if (pushCode !== 0) {
   process.exit(1)
 }
 
-/* ----------------------------------------------------------------- 4. seed */
-step(4, 'Nạp dữ liệu mẫu')
+/* ----------------------------------------------------------------- 2. seed */
+step(2, 'Nạp dữ liệu mẫu')
 const seedCode = run('npm', ['--prefix', 'server', 'run', 'seed:pg'], {
   DATABASE_URL,
 })

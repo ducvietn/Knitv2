@@ -78,19 +78,38 @@ const nf = async (method, path, body) => {
 const step = (n, text) => console.log(`\n[${n}] ${text}`)
 
 /* ------------------------------------------------------------- 1. team */
-step(1, 'Lấy thông tin team')
-const teams = await nf('GET', '/teams')
-const teamList = teams?.data ?? teams ?? []
-const team = TEAM_ID
-  ? teamList.find((t) => t.id === TEAM_ID)
-  : teamList[0]
-if (!team) {
-  console.error('Không tìm thấy team. Token có thể chưa gắn team nào.')
-  console.error('Các team khả dụng:', teamList.map((t) => `${t.id} (${t.name})`).join(', '))
-  process.exit(1)
+step(1, 'Xác định team')
+/**
+ * `GET /v1/teams` chỉ chạy được với token scoped ở cấp **organization**.
+ * Token scoped ở cấp team sẽ nhận 403 — khi đó cần biết `teamId` từ trước
+ * (lấy ở trang team trên dashboard Northflank, hoặc URL của service).
+ */
+let teamId = TEAM_ID
+let teamName = TEAM_ID
+
+if (!teamId) {
+  try {
+    const teams = await nf('GET', '/teams')
+    const teamList = teams?.teams ?? teams?.data ?? teams ?? []
+    const list = Array.isArray(teamList) ? teamList : []
+    const team = list[0]
+    if (!team) {
+      console.error('Không tìm thấy team nào.')
+      process.exit(1)
+    }
+    teamId = team.id
+    teamName = team.name
+    console.log(`   team: ${team.name} (${team.id})`)
+  } catch (err) {
+    console.error('   Không gọi được GET /v1/teams.')
+    console.error(`   ${err.message}`)
+    console.error('   Nguyên nhân thường gặp: token scoped ở cấp team, endpoint')
+    console.error('   này cần token cấp organization. Hãy đặt NORTHFLANK_TEAM_ID.')
+    process.exit(1)
+  }
+} else {
+  console.log(`   team id: ${teamId}`)
 }
-console.log(`   team: ${team.name} (${team.id})`)
-const teamId = team.id
 
 /* ----------------------------------------------------------- 2. project */
 step(2, 'Tìm hoặc tạo project')
@@ -101,11 +120,19 @@ project = projectList.find((p) => p.name === PROJECT_NAME)
 
 if (!project) {
   console.log(`   đang tạo project "${PROJECT_NAME}" ở region ${REGION}...`)
-  project = await nf('POST', `/teams/${teamId}/projects`, {
-    name: PROJECT_NAME,
-    description: 'KNIT — nen tang hoi dap sinh vien ULIS - VNU',
-    region: REGION,
-  })
+  try {
+    project = await nf('POST', `/teams/${teamId}/projects`, {
+      name: PROJECT_NAME,
+      description: 'KNIT — nen tang hoi dap sinh vien ULIS - VNU',
+      region: REGION,
+    })
+  } catch (err) {
+    console.error(`   ${err.message}`)
+    console.error('   Nếu là lỗi 403, token thiếu quyền')
+    console.error('   "Project > Projects > Manage > Create".')
+    console.error('   Sửa quyền của RBAC role mà token sinh ra, rồi chạy lại.')
+    process.exit(1)
+  }
 } else {
   console.log(`   dùng lại project "${project.name}" (${project.id})`)
 }
@@ -120,7 +147,8 @@ let service = serviceList.find((s) => s.name === SERVICE_NAME)
 
 if (!service) {
   console.log(`   đang tạo service "${SERVICE_NAME}"...`)
-  service = await nf('POST', `/projects/${projectId}/services/combined`, {
+  try {
+    service = await nf('POST', `/projects/${projectId}/services/combined`, {
     name: SERVICE_NAME,
     description: 'KNIT web + API',
     billing: {
@@ -168,7 +196,14 @@ if (!service) {
           }
         : {}),
     },
-  })
+    })
+  } catch (err) {
+    console.error(`   ${err.message}`)
+    console.error('   Nếu là lỗi 403, token thiếu quyền')
+    console.error('   "Project > Services > General > Create".')
+    console.error('   Sửa quyền của RBAC role mà token sinh ra, rồi chạy lại.')
+    process.exit(1)
+  }
 } else {
   console.log(`   dùng lại service "${service.name}" (${service.id})`)
 }

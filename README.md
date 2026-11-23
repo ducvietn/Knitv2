@@ -139,20 +139,20 @@ persistent volume cho combined service nen SQLite khong dung duoc o day.
 
 #### Buoc 1 — Supabase
 
-Tao project tai supabase.com, roi lay:
-- connection string (Project Settings > Database > Connection string > URI,
-  port 5432 — session pooler)
-- `SUPABASE_ACCESS_TOKEN` (Dashboard > Account > Access Tokens)
-- `project ref` (lay tu URL `https://<ref>.supabase.co`)
+Tao project tai supabase.com, roi lay connection string
+(Project Settings > Database > Connection string > **URI**, port 5432 —
+session pooler):
 
-    $env:SUPABASE_ACCESS_TOKEN="<access-token>"
-    $env:SUPABASE_PROJECT_REF="<project-ref>"
     $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
     npm run deploy:supabase
 
-Script nay lam ba viec: `supabase login` → `supabase link` →
-`supabase db push` (ap dung `supabase/migrations/0001_init.sql`) →
-`npm run seed:pg` (nap du lieu mau).
+Script nay chay `supabase db push --remote=<url>` (ap dung
+`supabase/migrations/0001_init.sql`) roi `npm run seed:pg` (nap du lieu mau).
+
+> **Khong can access token.** `db push --remote=<url>` noi thang bang mat
+> khau database nen bo qua hoan toan `supabase link` — va `supabase link`
+> lai doi token phai co quyen "Project Settings + API Keys + API Key Secrets"
+> (read), hay gap 403 voi token bi scope hep.
 
 Neu khong dung CLI duoc, mo **SQL Editor** tren dashboard va chay noi dung
 `supabase/migrations/0001_init.sql`, roi nap du lieu mau bang:
@@ -169,10 +169,27 @@ Storage de anh song lau. Script deploy tu gan `SUPABASE_URL`,
 #### Buoc 3 — Northflank
 
 Khong co CLI Northflank tren npm, nen `scripts/deploy-northflank.mjs` goi
-truc tiep REST API `https://api.northflank.com/v1`. Token lay o
-**Team Settings > API > Tokens**.
+truc tiep REST API `https://api.northflank.com/v1`.
+
+**Token** lay o **Team Settings > API > Tokens**. Token khoa theo mot RBAC
+role, nen quyen cua token = quyen cua role do. Role can co:
+
+| Quyen | Dung de |
+|---|---|
+| `Project > Projects > Manage > Create` | Tao project `knit` |
+| `Project > Services > General > Create` | Tao combined service |
+| `Project > Services > General > Update` | Patch env/ports, kick build |
+| `Account > Teams` (read) | Xem danh sach team (chi can khi token cap organization) |
+
+Cach nhanh nhat: dung role `admin` (co san, cap day du quyen). Token scope
+`team` thi route phai co `/v1/teams/{teamId}/...`; token scope `organization`
+thi route ngan hon `/v1/projects/...` la du.
+
+Neu token scope `team`, dat them `NORTHFLANK_TEAM_ID` (lay o URL trang team
+tren dashboard) — vi `GET /v1/teams` chi chay duoc voi token cap organization.
 
     $env:NORTHFLANK_API_TOKEN="<northflank-api-token>"
+    $env:NORTHFLANK_TEAM_ID="<team-id>"          # chi can neu token scope team
     $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
     $env:SUPABASE_URL="https://<ref>.supabase.co"
     $env:SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
