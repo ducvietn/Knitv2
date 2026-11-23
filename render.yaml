@@ -1,31 +1,42 @@
 # KNIT — cấu hình deploy cho Render.
 #
+# Kiến trúc: Render Web Service (Docker) + Supabase Postgres.
+#
 # Render free KHÔNG có persistent disk, nên SQLite sẽ mất dữ liệu mỗi lần
-# restart. Hai lựa chọn:
+# restart. Vì vậy production bắt buộc dùng Postgres:
 #
-#  A) Dùng Render với disk (cần plan trả phí, ~$7/tháng):
-#     https://render.com/docs/disks
+#   KNIT_DB_DRIVER=postgres  +  DATABASE_URL=<chuoi ket noi Supabase>
 #
-#  B) Dùng Render free + Neon/Supabase Postgres (có free tier Postgres).
-#     Khi đó cần đổi `server/src/lib/db.ts` sang driver `pg` — hiện tại
-#     code đang dùng better-sqlite3.
+# Khi đó `docker-entrypoint.sh` tự chạy migrate + seed trước khi khởi động
+# server, nên container hoàn toàn stateless — deploy lại không mất dữ liệu.
 #
-# Lựa chọn 0đ dễ nhất vẫn là Fly.io với volume 1 GB — xem `fly.toml`.
+# Lưu ý về mật khẩu: connection string chứa ký tự đặc biệt phải được
+# URL-encode trong trường hợp. Ngoài ra nên đặt `DATABASE_URL` bằng
+# "sync: false" để không ghi giá trị vào file blueprint.
 
 services:
   - type: web
     name: knit
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter # đổi thành `free` nếu chấp nhận mất dữ liệu khi restart
+    dockerContext: .
+    plan: free
     healthCheckPath: /api/health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 4000
+      # Driver Postgres — dùng `server/src/lib/sql.ts`.
+      - key: KNIT_DB_DRIVER
+        value: postgres
+      # Chỗ chứa DB chỉ dùng cho chế độ SQLite (local dev).
       - key: KNIT_DB
         value: /data/knit.db
+      # Avatar lưu trên Supabase Storage (stateless) khi có
+      # SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; nếu không thì fallback
+      # về thư mục local (mất khi restart).
       - key: KNIT_AVATAR_DIR
         value: /data/avatars
       - key: KNIT_WEB_DIST
@@ -34,7 +45,13 @@ services:
         value: /app/server/seed-data.json
       - key: KNIT_SECRET
         generateValue: true
-    disk:
-      name: knit-data
-      mountPath: /data
-      sizeGB: 1
+      # ---- Supabase Postgres ----
+      # Thay bằng chuỗi kết nối thật của bạn. Với pooler (IPv4 an toàn):
+      #   postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres
+      - key: DATABASE_URL
+        sync: false
+      # ---- Supabase Storage (avatar) ----
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

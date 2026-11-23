@@ -8,7 +8,7 @@
  * an toàn — không ghi đè dữ liệu đã có.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closePool, pool } from '../lib/pg'
 import { splitStatements } from '../lib/sql'
@@ -20,18 +20,35 @@ import { splitStatements } from '../lib/sql'
  * `node server/dist/migrate.js` từ `/app` nên `db/schema.sql` sẽ không
  * tồn tại. Dò ngược từ vị trí file đã bundle giúp script chạy được ở mọi
  * nơi — local (`server/`), container (`/app/server/dist/`).
+ *
+ * `KNIT_SCHEMA` là *gợi ý* chứ không phải lệnh tuyệt đối: nếu đường dẫn
+ * không tồn tại thì vẫn dò tiếp các đường dẫn mặc định, thay vì crash.
  */
 function findSchemaFile(): string {
-  const override = process.env.KNIT_SCHEMA
-  if (override) return resolve(process.cwd(), override)
-
   const here = dirname(fileURLToPath(import.meta.url))
-  const candidates = [
+  const candidates: string[] = []
+
+  const override = process.env.KNIT_SCHEMA
+  if (override) {
+    if (isAbsolute(override)) {
+      if (!existsSync(override)) {
+        throw new Error(`KNIT_SCHEMA trỏ tới file không tồn tại: ${override}`)
+      }
+      return override
+    }
+    candidates.push(
+      resolve(process.cwd(), override),
+      resolve(here, '..', '..', override),
+      resolve(here, '..', override),
+    )
+  }
+
+  candidates.push(
     resolve(here, '..', '..', 'db', 'schema.sql'), // server/db/schema.sql
     resolve(here, '..', 'db', 'schema.sql'),
     resolve(process.cwd(), 'db', 'schema.sql'),
     resolve(process.cwd(), 'server', 'db', 'schema.sql'),
-  ]
+  )
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }

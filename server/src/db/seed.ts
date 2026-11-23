@@ -10,7 +10,7 @@
  * Mật khẩu chung cho mọi tài khoản mẫu: `knit1234`.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import { closePool, pool } from '../lib/pg'
@@ -23,18 +23,41 @@ const DEFAULT_PASSWORD = 'knit1234'
  *
  * Xem giải thích ở `migrate.ts` — `process.cwd()` trong container là `/app`
  * nên đường dẫn tương đối sẽ không tồn tại.
+ *
+ * `KNIT_SEED` được xử lý như một *gợi ý* chứ không phải lệnh tuyệt đối:
+ * nếu đường dẫn đó không tồn tại (thường vì đặt tương đối như
+ * `./seed-data.json` nhưng script chạy từ thư mục khác), vẫn dò tiếp các
+ * đường dẫn mặc định. Nếu không làm vậy, container sẽ crash lúc start
+ * chỉ vì một biến môi trường trỏ sai.
  */
 function findSeedFile(): string {
-  const override = process.env.KNIT_SEED
-  if (override) return resolve(process.cwd(), override)
-
   const here = dirname(fileURLToPath(import.meta.url))
-  const candidates = [
+  const candidates: string[] = []
+
+  const override = process.env.KNIT_SEED
+  if (override) {
+    // Tuyệt đối thì dùng luôn; tương đối thì thử cả theo cwd lẫn theo
+    // thư mục module (bundle chạy ở `server/dist/`).
+    if (isAbsolute(override)) {
+      if (!existsSync(override)) {
+        throw new Error(`KNIT_SEED trỏ tới file không tồn tại: ${override}`)
+      }
+      return override
+    }
+    candidates.push(
+      resolve(process.cwd(), override),
+      resolve(here, '..', '..', override),
+      resolve(here, '..', override),
+    )
+  }
+
+  candidates.push(
     resolve(here, '..', '..', 'seed-data.json'), // server/seed-data.json
     resolve(here, '..', 'seed-data.json'),
     resolve(process.cwd(), 'seed-data.json'),
     resolve(process.cwd(), 'server', 'seed-data.json'),
-  ]
+  )
+
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }

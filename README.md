@@ -131,100 +131,86 @@ Kiem tra:
     fly deploy --app knit-ulis --config fly.toml --dockerfile Dockerfile
     railway up --service web
 
-### Supabase (Postgres) + Northflank (app)
+### Supabase (Postgres) + Render (app)
 
-Kien trúc: Supabase giu database (va Storage cho avatar), Northflank chay
-container app va tro `DATABASE_URL` ve Supabase. Northflank **khong** co
-persistent volume cho combined service nen SQLite khong dung duoc o day.
+Kien truc: Supabase giu database (va Storage cho avatar), Render chay
+container app va tro `DATABASE_URL` ve Supabase. Render free **khong** co
+persistent disk nen SQLite khong dung duoc o day — Postgres la bat buoc.
 
-#### Buoc 1 — Supabase
+#### Buoc 1 — Supabase: tao project va nap du lieu
 
-Tao project tai supabase.com, roi lay connection string
-(Project Settings > Database > Connection string > **URI**, port 5432 —
-session pooler):
+Tao project tai supabase.com. Sau do:
 
-    $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
-    npm run deploy:supabase
+    supabase login --token <access-token>
+    supabase link --project-ref <project-ref>
 
-Script nay chay `supabase db push --remote=<url>` (ap dung
-`supabase/migrations/0001_init.sql`) roi `npm run seed:pg` (nap du lieu mau).
+`supabase link` (khong dung `--skip-pooler`) sinh file
+`supabase/.temp/pooler-url` chua **chuoi ket noi pooler** cua project —
+dung chinh chuoi nay, vi ten host pooler co dang `aws-<N>-<region>` (N khong
+phai luon la `0`).
 
-> **Khong can access token.** `db push --remote=<url>` noi thang bang mat
-> khau database nen bo qua hoan toan `supabase link` — va `supabase link`
-> lai doi token phai co quyen "Project Settings + API Keys + API Key Secrets"
-> (read), hay gap 403 voi token bi scope hep.
+Truyen chuoi do vao bien moi truong:
+
+    $env:DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-<N>-<region>.pooler.supabase.com:5432/postgres"
+
+> **Vi sao dung pooler chu khong dung direct connection?**
+> Direct connection (`db.<ref>.supabase.co`) chi co **IPv6** — may local
+> Windows thuong khong co IPv6 native nen ket noi se timeout. Pooler ho tro
+> ca IPv4 va IPv6, dung cho moi noi (Render, may local) deu an toan.
+
+Ap dung luoc do + nap du lieu mau:
+
+    npm run migrate
+    npm run seed:pg
+
+`npm run migrate` doc `server/db/schema.sql` (dung `IF NOT EXISTS` nen chay
+lap nhieu lan cung an toan). `npm run seed:pg` nap `server/seed-data.json`:
+8 tai khoan · 10 cau hoi · 19 cau tra loi, mat khau chung `knit1234`.
 
 Neu khong dung CLI duoc, mo **SQL Editor** tren dashboard va chay noi dung
-`supabase/migrations/0001_init.sql`, roi nap du lieu mau bang:
-
-    npm run seed:pg
+`supabase/migrations/0001_init.sql`, roi nap du lieu mau bang `npm run seed:pg`.
 
 #### Buoc 2 — Storage cho avatar
 
 Dashboard > Storage > New bucket, ten `avatars`, bat **Public**. Container
 khong co volume nen `KNIT_AVATAR_DIR` se mat sach khi restart — dung
-Storage de anh song lau. Script deploy tu gan `SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY` va `SUPABASE_STORAGE_BUCKET`.
+Storage de anh song lau. Lay `SUPABASE_URL` va `SUPABASE_SERVICE_ROLE_KEY`
+o Project Settings > API.
 
-#### Buoc 3 — Northflank
+#### Buoc 3 — Render
 
-Khong co CLI Northflank tren npm, nen `scripts/deploy-northflank.mjs` goi
-truc tiep REST API `https://api.northflank.com/v1`.
+Render deploy tu `Dockerfile` (build ben trong Render, khong can push image).
+Cach nhanh nhat la **Blueprint**:
 
-**Token** lay o **Team Settings > API > Tokens**. Token khoa theo mot RBAC
-role, nen quyen cua token = quyen cua role do. Role can co:
+1. Day code len GitHub (da co san).
+2. Tren Render: **New > Blueprint**, chon repo `ducvietn/Knitv2`.
+3. Render doc `render.yaml` va tao web service. Cac bien `sync: false`
+   (`DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) se hoi ban
+   nhap gia tri — dien vao **Settings > Environment** cua service sau khi
+   tao neu blueprint bo qua.
 
-| Quyen | Dung de |
+Bien moi truong can co:
+
+| Bien | Gia tri |
 |---|---|
-| `Project > Projects > Manage > Create` | Tao project `knit` |
-| `Project > Services > General > Create` | Tao combined service |
-| `Project > Services > General > Update` | Patch env/ports, kick build |
-| `Account > Teams` (read) | Xem danh sach team (chi can khi token cap organization) |
+| `KNIT_DB_DRIVER` | `postgres` |
+| `DATABASE_URL` | chuoi pooler tu Buoc 1 |
+| `KNIT_SECRET` | Render tu sinh (`generateValue: true`) |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | service role key |
 
-Cach nhanh nhat: dung role `admin` (co san, cap day du quyen). Token scope
-`team` thi route phai co `/v1/teams/{teamId}/...`; token scope `organization`
-thi route ngan hon `/v1/projects/...` la du.
-
-Neu token scope `team`, dat them `NORTHFLANK_TEAM_ID` (lay o URL trang team
-tren dashboard) — vi `GET /v1/teams` chi chay duoc voi token cap organization.
-
-    $env:NORTHFLANK_API_TOKEN="<northflank-api-token>"
-    $env:NORTHFLANK_TEAM_ID="<team-id>"          # chi can neu token scope team
-    $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
-    $env:SUPABASE_URL="https://<ref>.supabase.co"
-    $env:SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
-    npm run deploy:northflank
-
-Script se:
-
-1. lay team tu token (hoac dung `NORTHFLANK_TEAM_ID` neu token chua gan team),
-2. tao project `knit` o region `asia-southeast` (neu chua co),
-3. tao combined service `knit-web` build tu `/Dockerfile`, branch `main`,
-   cong public `p01` → `4000`,
-4. gan bien moi truong runtime (`KNIT_DB_DRIVER=postgres`, `DATABASE_URL`,
-   `KNIT_SECRET`, `KNIT_WEB_DIST`, `KNIT_SEED`, va cac bien Storage),
-5. kich hoat build va in ra domain public.
-
-Northflank tu cap domain HTTPS (Let's Encrypt). Container chay
-`docker-entrypoint.sh` se tu chay migrate + nap du lieu mau (neu database
-rong) truoc khi start server, nen khong can chay migration thu cong.
+Container chay `docker-entrypoint.sh` se tu chay migrate + nap du lieu mau
+(neu database rong) truoc khi start server, nen khong can chay migration thu
+cong tren Render. Deploy lai khong lam mat du lieu.
 
 Kiem tra:
 
-    curl https://<domain>/api/health
+    curl https://<service>.onrender.com/api/health
 
-> **Luu y:** `runtimeEnvironment` va `ports` bi thay the toan bo khi PATCH.
-> Script luon gui day du, nen khong mat bien nao. `KNIT_SECRET` duoc sinh
-> moi lan chay — neu can giu nguyen, them `NORTHFLANK_KNIT_SECRET` vao bien
-> moi truong truoc khi chay script.
+> **Render free co gioi han dung luong.** Free service ngung sau 15 phut
+> khong co request, va `sleep` thuong keo dai ~50 giay lan khoi dong lai.
+> Neu can luon online, dung plan `starter` ($7/thang).
 
-### Render
-
-File render.yaml da san. Luu y: Render free KHONG co persistent disk
-nen SQLite se mat du lieu moi lan restart. Dung plan co disk, hoac doi
-sang Postgres.
-
-    render blueprint launch
 
 ### Docker (noi ban tu deploy)
 
