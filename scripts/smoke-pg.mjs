@@ -39,15 +39,21 @@ const check = (name, ok, detail = '') => {
 }
 
 try {
-  /* Cho server kip khoi dong */
+  /* Cho server kip khoi dong — `tsx` bien dich lau va `initSchema()` chay
+     migrate truoc khi listen, nen can nhien nhac thoi gian. */
   console.log('=== Khoi dong server ===')
   let up = false
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 90; i++) {
     await sleep(1000)
     try {
       const r = await fetch(`${BASE}/api/health`)
       if (r.ok) { up = true; break }
     } catch { /* chua len */ }
+    // Server chet -> dung vong lap, khong cho lai 90 giay vo ich
+    if (child.exitCode !== null) {
+      console.log(`  server da tho voi code ${child.exitCode}`)
+      break
+    }
   }
   if (!up) {
     console.log('Server khong khoi dong. Log:')

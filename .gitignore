@@ -15,6 +15,9 @@ server/data/
 .env
 .env.local
 .env.*.local
+# File cấu hình riêng cho từng nền tảng deploy (chứa connection string thật)
+.env.render
+.env.production
 
 # Log
 *.log

@@ -18,6 +18,8 @@ services:
   - type: web
     name: knit
     runtime: docker
+    repo: https://github.com/ducvietn/Knitv2
+    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
@@ -26,8 +28,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 4000
+      # `PORT` do Render tu cap — khong gan cung trong blueprint de tranh
+      # xung dot voi gia tri Render inject.
       # Driver Postgres — dùng `server/src/lib/sql.ts`.
       - key: KNIT_DB_DRIVER
         value: postgres
@@ -46,8 +48,13 @@ services:
       - key: KNIT_SECRET
         generateValue: true
       # ---- Supabase Postgres ----
-      # Thay bằng chuỗi kết nối thật của bạn. Với pooler (IPv4 an toàn):
-      #   postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres
+      # Thay bằng chuỗi kết nối thật của bạn. Dùng POOLER (hỗ trợ cả IPv4
+      # lẫn IPv6) chứ không dùng direct connection (chỉ có IPv6):
+      #   postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-<N>-<region>.pooler.supabase.com:5432/postgres
+      #
+      # ⚠️ `N` trong `aws-<N>-<region>` KHÔNG phải luôn là `0`. Lấy đúng
+      # chuỗi bằng cách chạy `supabase link --project-ref <ref>` rồi đọc
+      # file `supabase/.temp/pooler-url`.
       - key: DATABASE_URL
         sync: false
       # ---- Supabase Storage (avatar) ----
