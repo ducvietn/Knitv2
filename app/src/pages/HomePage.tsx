@@ -12,6 +12,15 @@ import {
 import { useI18n, formatCount } from '../lib/i18n'
 import { QuestionCard } from '../components/QuestionCard'
 import { OfficialPortals } from '../components/OfficialPortals'
+import { Pagination } from '../components/Pagination'
+
+/**
+ * Số câu hỏi hiện trên mỗi trang.
+ *
+ * Danh sách KNIT đang có hơn 40 câu — hiện tất cả một lượt làm trang nặng
+ * và khó cuộn trên điện thoại.
+ */
+const PAGE_SIZE = 6
 
 export function HomePage() {
   const { t, bi, lang } = useI18n()
@@ -23,10 +32,28 @@ export function HomePage() {
   const topicParam = params.get('topic')
   const activeTopic = TOPICS.find((x) => x.id === topicParam)?.id
 
+  /**
+   * Trang hiện tại — nằm trong URL để người dùng chia sẻ được link.
+   */
+  const pageParam = Number(params.get('page') ?? '1')
+  const [page, setPage] = useState(Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1)
+
   // Nạp danh sách câu hỏi từ server.
   useEffect(() => {
     refreshQuestions().catch(() => undefined)
   }, [])
+
+  /**
+   * Đồng bộ trang với URL.
+   *
+   * Cần thiết khi người dùng bấm nút Back của trình duyệt, hoặc mở link
+   * `?page=3` trực tiếp.
+   */
+  useEffect(() => {
+    const p = Number(params.get('page') ?? '1')
+    const next = Number.isFinite(p) && p > 0 ? p : 1
+    if (next !== page) setPage(next)
+  }, [params, page])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -47,6 +74,8 @@ export function HomePage() {
 
   const handleSearch = (value: string) => {
     setQuery(value)
+    // Tìm kiếm là danh sách mới — quay về trang đầu.
+    setPage(1)
     similarQuestions(value).then(setSuggestions)
   }
 
@@ -54,8 +83,35 @@ export function HomePage() {
     const next = new URLSearchParams(params)
     if (id) next.set('topic', id)
     else next.delete('topic')
+    // Đổi chủ đề cũng là danh sách mới — quay về trang đầu.
+    next.delete('page')
     setParams(next)
+    setPage(1)
   }
+
+  /**
+   * Chuyển trang — ghi số trang vào URL để link chia sẻ được.
+   */
+  const goToPage = (next: number) => {
+    const params2 = new URLSearchParams(params)
+    if (next <= 1) params2.delete('page')
+    else params2.set('page', String(next))
+    setParams(params2)
+    setPage(next)
+    // Cuộn lên đầu danh sách, nếu không người dùng thấy vẫn trang cũ.
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  /**
+   * Cắt danh sách theo trang.
+   *
+   * Trang hiện tại được ép về giới hạn hợp lệ — ví dụ người dùng đang ở
+   * trang 5 rồi lọc còn 1 trang, ta đưa họ về trang cuối thay vì hiện trang
+   * trống.
+   */
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const unresolved = state.questions.filter((q) => !q.answered).length
 
@@ -252,16 +308,20 @@ export function HomePage() {
                 </Link>
               </div>
             ) : (
-              <div className="space-y-3">
-                {filtered.map((q) => (
-                  <QuestionCard
-                    key={q.id}
-                    question={q}
-                    onToggleAlsoNeed={markAlsoNeed}
-                    isAlsoNeedMarked={state.alsoNeed.includes(q.id)}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="space-y-3">
+                  {visible.map((q) => (
+                    <QuestionCard
+                      key={q.id}
+                      question={q}
+                      onToggleAlsoNeed={markAlsoNeed}
+                      isAlsoNeedMarked={state.alsoNeed.includes(q.id)}
+                    />
+                  ))}
+                </div>
+
+                <Pagination page={currentPage} pageCount={pageCount} onChange={goToPage} />
+              </>
             )}
           </div>
 
