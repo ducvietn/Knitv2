@@ -62,3 +62,12 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # ---- Tìm kiếm web cho Tầng 3 của chatbot điều hướng ----
+      # Khi diễn đàn chưa có bài nào đủ tin cậy, chatbot tra cứu quy chế
+      # chính thức trên ulis.vnu.edu.vn. Cần MỘT trong hai key dưới đây;
+      # thiếu cả hai thì Tầng 3 tự bỏ qua, các tầng khác vẫn chạy bình
+      # thường.
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
