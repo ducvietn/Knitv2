@@ -4,6 +4,13 @@
 #   → http://localhost:4000
 #
 # Dữ liệu nằm trong volume `knit-data` nên không mất khi restart container.
+#
+# Thử với Postgres (giống hệt Supabase khi deploy):
+#
+#   docker compose --profile postgres up -d db
+#   npm --prefix server run migrate
+#   npm --prefix server run seed:pg
+#   KNIT_DB_DRIVER=postgres DATABASE_URL=postgres://knit:knit@localhost:5432/knit npm run dev
 
 services:
   knit:
@@ -23,5 +30,24 @@ services:
       - knit-data:/data
     restart: unless-stopped
 
+  # Postgres cho môi trường local — chỉ chạy khi bật profile `postgres`.
+  db:
+    image: postgres:16-alpine
+    profiles: ['postgres']
+    environment:
+      POSTGRES_USER: knit
+      POSTGRES_PASSWORD: knit
+      POSTGRES_DB: knit
+    ports:
+      - '5432:5432'
+    volumes:
+      - knit-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U knit -d knit']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   knit-data:
+  knit-pgdata:

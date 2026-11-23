@@ -6,6 +6,9 @@
 # Run:    docker run -p 4000:4000 -v knit-data:/data -e KNIT_SECRET=... knit
 #
 # Ở production, web và API cùng origin nên không cần cấu hình domain riêng.
+#
+# Cơ sở dữ liệu: SQLite (mặc định, dữ liệu trên volume) hoặc Postgres
+# (khi có `DATABASE_URL` — ví dụ Supabase). Xem `server/src/lib/sql.ts`.
 
 # ---------------------------------------------------------------- dependencies
 FROM node:20-bookworm-slim AS deps
@@ -34,6 +37,9 @@ COPY shared ./shared
 # Build web app (Vite) — bản production với API cùng origin.
 RUN npm --prefix app ci && npm --prefix app run build
 
+# Sinh `schema.generated.ts` từ `server/db/schema.sql` (nguồn duy nhất).
+RUN node scripts/build-schema.mjs
+
 # Bundle server thành một file ESM chạy được.
 RUN npm --prefix server run build
 
@@ -54,6 +60,9 @@ COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/seed-data.json ./server/seed-data.json
 COPY --from=build /app/server/package.json ./server/package.json
+
+# Lược đồ Postgres — dùng cho script migration khi chạy với Supabase.
+COPY --from=build /app/server/db ./server/db
 
 # Bản build của web app — server phục vụ chúng như file tĩnh.
 COPY --from=build /app/app/dist ./app/dist

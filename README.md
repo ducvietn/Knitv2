@@ -3,7 +3,7 @@ Nền tảng hỏi đáp dành cho sinh viên ULIS — VNU.
 ## Cấu trúc
 
 - `app/` — web app React + Vite + TypeScript + Tailwind (client)
-- `server/` — API Express + SQLite (server)
+- `server/` — API Express + SQLite hoặc Postgres (server)
 - `shared/` — kiểu dữ liệu dùng chung
 - `scripts/` — công cụ phát triển
 
@@ -27,6 +27,17 @@ Nạp dữ liệu mẫu (xoá sạch rồi nạp lại):
     npm run seed
 
 Tài khoản thử: `a2@ulis.vnu.edu.vn` / `knit1234`
+
+### Chạy local với Postgres (giống hệt môi trường Supabase)
+
+    docker compose --profile postgres up -d db
+    npm run migrate
+    npm run seed:pg
+    $env:KNIT_DB_DRIVER="postgres"
+    $env:DATABASE_URL="postgres://knit:knit@localhost:5432/knit"
+    npm run dev
+
+Bỏ `KNIT_DB_DRIVER`/`DATABASE_URL` đi thì app quay lại dùng SQLite.
 
 ## Build
 
@@ -120,6 +131,78 @@ Kiem tra:
     fly deploy --app knit-ulis --config fly.toml --dockerfile Dockerfile
     railway up --service web
 
+### Supabase (Postgres) + Northflank (app)
+
+Kien trúc: Supabase giữ database (và Storage cho avatar), Northflank chạy
+container app và trỏ `DATABASE_URL` về Supabase. Northflank **không** có
+persistent volume cho combined service nên SQLite không dùng được ở đây.
+
+**Buoc 1 — Supabase.** Tao project tai supabase.com, lay connection string
+(URI, port 5432 — session pooler) va `SUPABASE_ACCESS_TOKEN` (Dashboard >
+Account > Access Tokens).
+
+    npm i -g supabase
+    supabase login --token <SUPABASE_ACCESS_TOKEN>
+    supabase link --project-ref <project-ref>
+    supabase db push            # ap dung supabase/migrations/0001_init.sql
+
+Nap du lieu mau (tuong doi DATABASE_URL tro ve Supabase):
+
+    $env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres?sslmode=require"
+    npm run seed:pg
+
+**Buoc 2 — Storage cho avatar.** Dashboard > Storage > New bucket, ten
+`avatars`, bat **Public**. Container khong co volume nen `KNIT_AVATAR_DIR`
+se mat sach khi restart — dung Storage de anh song lau.
+
+**Buoc 3 — Northflank.** Khong co CLI, dung REST API
+`https://api.northflank.com/v1`. Token lay o Team Settings > API > Tokens.
+
+    $env:NF_TOKEN="<northflank-api-token>"
+    $env:NF_TEAM="<team-id>"
+
+Tao project:
+
+    $h = @{ Authorization = "Bearer $env:NF_TOKEN" }
+    $project = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/teams/$env:NF_TEAM/projects" -Headers $h -Body (@{ name = "knit" } | ConvertTo-Json)
+
+Tao combined service (build tu Dockerfile trong repo):
+
+    $body = @{
+      name = "knit-web"
+      deployment = @{ instances = 1 }
+      buildSettings = @{ buildEngine = "buildkit"; dockerfile = @{ buildEngine = "buildkit"; dockerFilePath = "/Dockerfile"; dockerWorkDir = "/" } }
+      vcsData = @{ projectUrl = "https://github.com/ducvietn/Knitv2"; projectType = "github"; projectBranch = "main" }
+    } | ConvertTo-Json -Depth 10
+    $svc = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/combined" -Headers $h -Body $body -ContentType "application/json"
+
+Dat bien moi truong (quan trong — `KNIT_DB_DRIVER=postgres` va `DATABASE_URL`):
+
+    $envs = @(
+      @{ name = "NODE_ENV"; value = "production" }
+      @{ name = "PORT"; value = "4000" }
+      @{ name = "KNIT_DB_DRIVER"; value = "postgres" }
+      @{ name = "DATABASE_URL"; value = "<supabase-url>?sslmode=require" }
+      @{ name = "KNIT_SECRET"; value = "<chuoi-ngau-nhien>" }
+      @{ name = "KNIT_WEB_DIST"; value = "/app/app/dist" }
+      @{ name = "KNIT_SEED"; value = "/app/server/seed-data.json" }
+      @{ name = "SUPABASE_URL"; value = "https://<project-ref>.supabase.co" }
+      @{ name = "SUPABASE_SERVICE_ROLE_KEY"; value = "<service-role-key>" }
+    ) | ConvertTo-Json
+    Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/$($svc.id)/environment" -Headers $h -Body $envs -ContentType "application/json"
+
+Mo cong public:
+
+    $port = Invoke-RestMethod -Method Post -Uri "https://api.northflank.com/v1/projects/$($project.id)/services/$($svc.id)/ports" -Headers $h -Body (@{ internalPort = 4000; protocol = "HTTP"; public = $true; name = "p01" } | ConvertTo-Json) -ContentType "application/json"
+
+Northflank tu cap domain HTTPS (Let's Encrypt). Deploy lai moi lan push
+commit len `main` — container chay `docker-entrypoint.sh` tu chay migrate
+va nap du lieu mau (neu database rong) truoc khi start server.
+
+Kiem tra:
+
+    curl https://<domain>/api/health
+
 ### Render
 
 File render.yaml da san. Luu y: Render free KHONG co persistent disk
@@ -143,8 +226,13 @@ Hoac dung file san co:
 |---|---|---|
 | KNIT_SECRET | Co | Chuoi bi mat ky JWT. Khong co o production thi server tu dung |
 | PORT | Khong | Mac dinh 4000 |
+| KNIT_DB_DRIVER | Khong | `postgres` hoac `sqlite`. Trong = tu chon theo DATABASE_URL |
+| DATABASE_URL | Khong | Chuoi ket noi Postgres (Supabase). Co gia tri -> dung Postgres |
 | KNIT_DB | Khong | Duong dan file SQLite, mac dinh ./data/knit.db |
 | KNIT_AVATAR_DIR | Khong | Thu muc luu anh avatar, mac dinh ./data/avatars |
+| SUPABASE_URL | Khong | URL Supabase — bat Storage cho avatar (khong can volume) |
+| SUPABASE_SERVICE_ROLE_KEY | Khong | Key de upload/xoa anh trong Supabase Storage |
+| SUPABASE_STORAGE_BUCKET | Khong | Ten bucket avatar, mac dinh `avatars` |
 | KNIT_WEB_DIST | Khong | Thu muc web tinh, mac dinh ../app/dist |
 | KNIT_SEED | Khong | File du lieu mau, mac dinh ./seed-data.json |
 | KNIT_CORS_ORIGINS | Khong | Danh sach origin duoc phep goi API. Rong = chi same-origin |

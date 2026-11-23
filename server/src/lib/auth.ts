@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import type { NextFunction, Request, Response } from 'express'
-import { db } from './db'
+import { sql } from './sql'
 import type { AvatarTone, PublicUser, Role } from '../../../shared/types'
 
 /**
@@ -58,21 +58,27 @@ export const toPublicUser = (row: Record<string, unknown>): PublicUser => ({
   avatarTone: (row.avatar_tone ? String(row.avatar_tone) : 'brand') as AvatarTone,
 })
 
-export const findUserById = (id: string) =>
-  db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export const findUserById = async (id: string) =>
+  (await sql.prepare('SELECT * FROM users WHERE id = ?').get(id)) as
+    | Record<string, unknown>
+    | undefined
 
-export const findUserByEmail = (email: string) =>
-  db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as
+export const findUserByEmail = async (email: string) =>
+  (await sql.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase())) as
     | Record<string, unknown>
     | undefined
 
 /** Đọc Bearer token và gắn user vào request. Không chặn nếu thiếu token. */
-export function attachUser(req: AuthedRequest, _res: Response, next: NextFunction) {
+export async function attachUser(
+  req: AuthedRequest,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
   const header = req.headers.authorization
   if (header?.startsWith('Bearer ')) {
     const userId = verifyToken(header.slice(7))
     if (userId) {
-      const row = findUserById(userId)
+      const row = await findUserById(userId)
       if (row) req.user = toPublicUser(row)
     }
   }

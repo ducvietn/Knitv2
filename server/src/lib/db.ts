@@ -1,22 +1,26 @@
-import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-
-const DB_PATH = resolve(process.env.KNIT_DB ?? './data/knit.db')
-
-mkdirSync(dirname(DB_PATH), { recursive: true })
-
-export const db = new Database(DB_PATH)
-
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
+import { sql, nowIso } from './sql'
+import { POSTGRES_SCHEMA } from '../db/schema.generated'
 
 /**
- * Lược đồ CSDL. Chỉ những gì phiên bản đầu cần:
+ * Lớp truy cập dữ liệu của KNIT.
+ *
+ * Backend được chọn ở `server/src/lib/sql.ts`:
+ *
+ * - **SQLite** (mặc định ở local) — file `./data/knit.db`, không cần server.
+ * - **Postgres** (khi có `DATABASE_URL`) — dùng cho Supabase khi deploy.
+ *
+ * Lược đồ SQLite nằm trong hàm `initSchema` bên dưới; bản Postgres tương
+ * ứng nằm ở `server/db/schema.sql`. Hai bản phải giữ cùng tên bảng/cột.
+ */
+export { sql, nowIso }
+export const db = sql
+
+/**
+ * Lược đồ CSDL SQLite. Chỉ những gì phiên bản đầu cần:
  * tài khoản + phân quyền, câu hỏi, câu trả lời (kèm biến thể ẩn danh),
  * nguồn chính thức, theo dõi, thông báo nội bộ và báo cáo nội dung.
  */
-db.exec(`
+const SQLITE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   email         TEXT NOT NULL UNIQUE,
@@ -126,19 +130,37 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_answers_question ON answers(question_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
-`)
-
-export const nowIso = () => new Date().toISOString()
+`
 
 /**
- * Thêm cột mới nếu bảng chưa có — để database cũ vẫn dùng được sau khi
- * thêm tính năng mà không cần xoá dữ liệu.
+ * Tạo lược đồ nếu chưa có.
+ *
+ * Gọi từ `index.ts` trước khi server bắt đầu lắng nghe — nhờ vậy các route
+ * không bao giờ gặp bảng chưa tồn tại.
+ *
+ * - **SQLite**: chạy lược đồ SQLite nhúng sẵn.
+ * - **Postgres**: chạy lược đồ Postgres nhúng sẵn (sinh từ
+ *   `server/db/schema.sql`). Tất cả câu lệnh đều dùng `IF NOT EXISTS` nên
+ *   chạy lại nhiều lần vẫn an toàn — không ghi đè dữ liệu đã có.
  */
-function addColumnIfMissing(table: string, column: string, definition: string) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
-  if (cols.some((c) => c.name === column)) return
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-}
+export const initSchema = async (): Promise<void> => {
+  if (sql.name === 'sqlite') {
+    await sql.exec(SQLITE_SCHEMA)
 
-addColumnIfMissing('users', 'avatar_url', 'TEXT')
-addColumnIfMissing('users', 'avatar_tone', "TEXT DEFAULT 'brand'")
+    /**
+     * Thêm cột mới nếu bảng chưa có — để database cũ vẫn dùng được sau khi
+     * thêm tính năng mà không cần xoá dữ liệu.
+     */
+    const addColumnIfMissing = async (table: string, column: string, definition: string) => {
+      const cols = await sql.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
+      if (cols.some((c) => c.name === column)) return
+      await sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    }
+
+    await addColumnIfMissing('users', 'avatar_url', 'TEXT')
+    await addColumnIfMissing('users', 'avatar_tone', "TEXT DEFAULT 'brand'")
+    return
+  }
+
+  await sql.exec(POSTGRES_SCHEMA)
+}

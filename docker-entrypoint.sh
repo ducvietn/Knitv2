@@ -11,6 +11,17 @@ set -e
 
 DATA_DIR="${KNIT_DATA_DIR:-/data}"
 
+# Chay migration Postgres truoc khi start app (chi khi dung Postgres driver).
+# `KNIT_DB_DRIVER=postgres` hoac co `DATABASE_URL` -> dung `pg`.
+if [ "${KNIT_DB_DRIVER:-}" = "postgres" ] || [ -n "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint] database driver = postgres — chay migration..."
+  node server/dist/migrate.js
+  if [ "${KNIT_SEED_ON_START:-1}" = "1" ]; then
+    echo "[entrypoint] nap du lieu mau (neu database rong)..."
+    node server/dist/seed.js || echo "[entrypoint] seed bi bo qua (khong chan app)"
+  fi
+fi
+
 if [ "$(id -u)" = "0" ]; then
   mkdir -p "$DATA_DIR"
   # Volume cua Railway mount bang root:root, thu muc trong image la
