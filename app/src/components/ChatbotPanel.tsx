@@ -52,6 +52,13 @@ interface ChatMessage {
   text: string
   /** Với bot: các nguồn liên quan. */
   sources?: ChatSource[]
+  /**
+   * Với bot: đang chờ LLM lọc nguồn xong chưa.
+   *
+   * Chỉ khi chưa xong thì hiện phần "đang tìm" — thẻ nguồn chỉ hiện khi
+   * đã chọn lọc xong để tránh hiện ra một loạt bài không liên quan.
+   */
+  searching?: boolean
   /** Với bot: có nên gợi ý đăng bài không. */
   suggestPost?: boolean
   suggestedTitle?: string
@@ -106,11 +113,16 @@ export function ChatbotPanel({
         role: 'bot',
         text: t('Mình đang tìm trong cộng đồng…', 'Searching the community…'),
         sources: [],
+        searching: true,
       },
     ])
 
     /**
-     * Bước 1 — gọi không chờ, nhận ngay thẻ bài viết gốc (~100ms).
+     * Bước 1 — gọi không chờ, nhận ngay phản hồi tức thì (~100ms).
+     *
+     * Bước này KHÔNG kèm thẻ nguồn: danh sách ứng viên lúc đó còn thô,
+     * chưa được LLM lọc. Chỉ khi có kết quả chọn lọc (bước chờ) mới hiện
+     * thẻ "Bài viết liên quan" — lúc đó thẻ nào cũng đúng và tối đa 4 thẻ.
      */
     try {
       const quick = await api.post<ChatReply>('/chatbot', { question, lang })
@@ -120,11 +132,7 @@ export function ChatbotPanel({
             ? {
                 ...m,
                 text: quick.answer,
-                sources: quick.sources,
-                suggestPost: quick.suggestPost,
-                suggestedTitle: quick.suggestedTitle,
-                suggestedBody: quick.suggestedBody,
-                suggestAnonymous: quick.suggestAnonymous,
+                searching: true,
               }
             : m,
         ),
@@ -146,6 +154,7 @@ export function ChatbotPanel({
                   ...m,
                   text: full.answer,
                   sources: full.sources,
+                  searching: false,
                   suggestPost: full.suggestPost,
                   suggestedTitle: full.suggestedTitle,
                   suggestedBody: full.suggestedBody,
@@ -248,6 +257,14 @@ export function ChatbotPanel({
                     </p>
                   </div>
 
+                  {/* Đang lọc nguồn — chỉ hiện khi chưa có kết quả chọn lọc */}
+                  {message.searching && (
+                    <div className="mt-2.5 flex items-center gap-2 text-2xs text-ink-faint">
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-paper-300 border-t-brand-500" />
+                      {t('Đang lọc bài viết liên quan…', 'Filtering related threads…')}
+                    </div>
+                  )}
+
                   {/* Bước 2: thẻ bài viết gốc + người đã trả lời */}
                   {message.sources && message.sources.length > 0 && (
                     <div className="mt-2.5 space-y-2">
@@ -294,7 +311,7 @@ export function ChatbotPanel({
                   )}
 
                   {/* Bước 3: chuyển thành bài đăng ẩn danh */}
-                  {message.suggestPost && (
+                  {message.suggestPost && !message.searching && (
                     <button
                       type="button"
                       onClick={() => convertToPost(message)}

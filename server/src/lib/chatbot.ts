@@ -241,8 +241,18 @@ export const chat = async (
         turn.lang === 'en'
           ? 'Searching the community…'
           : 'Mình đang tìm trong cộng đồng…',
-      sources: candidates.slice(0, 8),
-      suggestPost: candidates.length === 0,
+      /**
+       * KHÔNG kèm nguồn ở bước tức thì.
+       *
+       * Danh sách ứng viên lúc này còn thô — chưa qua LLM re-rank — nên
+       * có cả những bài chỉ trùng từ khoá. Hiện ra lúc này sẽ khiến sinh
+       * viên thấy một loạt thẻ không liên quan rồi phải tự lọc.
+       *
+       * Thay vào đó, chỉ khi đã có kết quả chọn lọc (bước chờ) mới trả về
+       * nguồn — lúc đó thẻ nguồn luôn đúng và chỉ có tối đa 4 thẻ.
+       */
+      sources: [],
+      suggestPost: false,
       suggestedTitle: turn.question,
       suggestedBody: turn.question,
       suggestAnonymous: false,
