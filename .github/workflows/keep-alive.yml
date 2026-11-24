@@ -1,0 +1,56 @@
+name: Keep KNIT awake
+
+# Render free: web service bi ngu sau 15 phut khong co request nao.
+# Workflow nay "dinh" service bang cach goi GET /api/health moi 5 phut.
+#
+# Vi sao 5 phut chu khong 15:
+#   - Render free ngung sau 15 phut im lang.
+#   - GitHub Actions co the delay job cron vai phut khi chay dong loat.
+#   - 5 phut tao du bien an toan (3 lan) ma van re (288 lan/ngay, moi lan
+#     < 15 giay — repo public nen khong gioi han minute).
+#
+# Repo nay PUBLIC nen GitHub Actions cap tieu cho tu do.
+
+on:
+  schedule:
+    # Moi 5 phut.
+    - cron: '*/5 * * * *'
+  # Cho phep chay tay tu tab Actions > Keep KNIT awake > Run workflow.
+  workflow_dispatch: {}
+
+concurrency:
+  # Khong cho cac lan chay chong nhau.
+  group: keep-awake
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Ping health endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /api/health
+        run: |
+          set -uo pipefail
+          URL="https://knitv2.onrender.com/api/health"
+
+          # Render free hay cold start (~50 giay), nen thua lai vai lan.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' \
+              --max-time 90 --retry 0 "$URL" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "OK  $URL -> $code (lan thu $attempt)"
+              cat /tmp/health.json; echo
+              exit 0
+            fi
+            echo "Lan $attempt: HTTP $code — thu lai sau 20s"
+            sleep 20
+          done
+
+          echo "KHONG PING DUOC — $URL tra ve '$code'"
+          echo "Kiem tra Render Dashboard > service 'knit' > Events."
+          cat /tmp/health.json 2>/dev/null || true
+          exit 1

@@ -211,6 +211,41 @@ Kiem tra:
 > khong co request, va `sleep` thuong keo dai ~50 giay lan khoi dong lai.
 > Neu can luon online, dung plan `starter` ($7/thang).
 
+#### Giu Render khong bi ngu (free plan)
+
+Render free **ngung service sau 15 phut khong co request nao**. Khi bi ngu,
+trang tra ve loi 502/503 va lan khoi dong lai ton tai ~50 giay.
+
+Cach giai quyet cho repo nay (repo **public**, nen GitHub Actions cap tieu):
+
+| Cach | Chi phi | Do tin cay |
+|---|---|---|
+| `.github/workflows/keep-alive.yml` — cron moi 5 phut goi `/api/health` | $0 | Gioi han do GitHub delay cron |
+| Upwork / cron-job.org / Render cron service | $0-5/thang | Phu thuoc dich vu ben ngoai |
+
+**Cach da dung trong repo (khuyen nghi):**
+
+    .github/workflows/keep-alive.yml
+
+Workflow chay `GET https://knitv2.onrender.com/api/health` moi 5 phut. Nhanh
+hon 15 phut de chắc chắn timer cua Render khong bao gio reset. Co `retry`
+3 lan vi free plan hay cold start (~50 giay).
+
+> **Luu y ve gioi han cua GitHub Actions:** job cron tren repo public **khong
+> bao gio bi delay** (chi private repo moi co the delay 5-30 phut). Repo nay
+> public nen ping 5 phut la du reliable.
+
+> **Can mo workflow:** repo public nen workflow tu dong chay ngay khi push
+> len `main`. Neu khong thay, vao tab **Actions > Keep KNIT awake** va bam
+> **Enable workflow**.
+
+> **Cau hinh `render.yaml`:** khi deploy lai qua Blueprint, Render se dung
+> `plan: free` va `healthCheckPath: /api/health` san. Khong can doi gi them.
+
+**Neu van bi ngu** (vi du: workflow chua duoc bat, hoac Render deploy lai
+va lam workflow bi tre): vao Render Dashboard > service `knit` > **Manual
+Deploy** > **Restart** de mo lai ngay.
+
 
 ### Docker (noi ban tu deploy)
 
